@@ -1,0 +1,9 @@
+{
+  "$schema": "https://fluidbar.doulor.cn/schemas/locale.schema.json",
+  "locale": "en-US",
+  "version": 1,
+  "messages": {
+    "island.title": "Sample Minimal",
+    "island.body": "Hello from a FluidBar v2 plugin."
+  }
+}

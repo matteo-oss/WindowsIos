@@ -1,0 +1,245 @@
+using FluidBar.App.Hosting.Skia;
+using FluidBar.Core;
+using FluidBar.Core.Interaction;
+
+namespace FluidBar.Ui.Tests;
+
+/// <summary>
+/// Prototype2 page-transition contract: the pager must follow the pointer/wheel immediately, queue
+/// page steps instead of swallowing them, land on the page the finger left behind and never rebound
+/// past the target. The expected numbers come from the prototype's own PAGER contract
+/// (T 0.35 s / ζ 0.75, gain 0.85, notch 60 DIP, 120 ms window) measured frame by frame in
+/// docs/rewrite/prototype2 via Playwright.
+/// </summary>
+public sealed class PageSwitchFeelTests
+{
+    private static readonly TimeSpan Frame = TimeSpan.FromMilliseconds(1000.0 / 60.0);
+
+    private static (ControllerFixture Fixture, SkiaIslandController Controller) Create()
+    {
+        var fixture = ControllerFixture.Create();
+        fixture.ExpandAndSettle();
+        fixture.Controller.HandlePageRequest(FluidBar.Core.Activities.PageRef.Home);
+        fixture.RunToRest();
+        return (fixture, fixture.Controller);
+    }
+
+    private static void Advance(ControllerFixture fixture, int frames)
+    {
+        for (var i = 0; i < frames; i++)
+        {
+            fixture.Time.Advance(Frame);
+            fixture.Controller.Advance(Frame);
+        }
+    }
+
+    private static double Position(SkiaIslandController controller) => controller.RenderState.Pager.PagePosition;
+
+    [Fact]
+    public void SingleLightNotchTurnsOnePageWithASubtleOvershoot()
+    {
+        var (fixture, controller) = Create();
+        using var _fixture = fixture;
+        var positions = new List<double> { Position(controller) };
+
+        // One physical notch is one 60 DIP page step.
+        Assert.True(controller.HandleWheel(PagerConstants.WheelDipPerNotch, horizontal: false, shift: false).Paged);
+        for (var i = 0; i < 90; i++)
+        {
+            Advance(fixture, 1);
+            positions.Add(Position(controller));
+        }
+
+        Assert.Equal(1, controller.Pager.SelectedIndex);
+        Assert.Equal(1.0, positions[^1], 3);
+        // Feel pass (2026-10-21): the snap uses zeta 0.75, whose analytic overshoot is ~2.8 % of a
+        // page; it must stay subtle and settle exactly on the target (previously "no overshoot").
+        Assert.True(positions.Max() <= 1.035, "the overshoot must stay subtle, peak " + positions.Max());
+        Assert.Equal(1.0, positions[^1], 3);
+    }
+
+    [Fact]
+    public void ContinuousWheelGestureTurnsOnePagePerNotch()
+    {
+        var (fixture, controller) = Create();
+        using var _fixture = fixture;
+
+        // Horizontal wheel explicitly pages across content that may scroll vertically (including
+        // the taller clipboard summaries). Each notch advances one page.
+        for (var i = 0; i < 6; i++)
+        {
+            controller.HandleWheel(PagerConstants.WheelDipPerNotch, horizontal: true, shift: false);
+            Advance(fixture, 4);
+        }
+
+        for (var i = 0; i < 90; i++)
+        {
+            Advance(fixture, 1);
+        }
+
+        Assert.Equal(5, controller.Pager.SelectedIndex);
+        Assert.Equal(controller.Pager.SelectedIndex, (int)Math.Round(Position(controller)));
+    }
+
+    [Fact]
+    public void ContinuousWheelAtTenHertzTurnsOnePagePerNotch()
+    {
+        var (fixture, controller) = Create();
+        using var _fixture = fixture;
+
+        // Horizontal notches at 10 Hz page even when the current list has vertical overflow.
+        for (var i = 0; i < 6; i++)
+        {
+            controller.HandleWheel(PagerConstants.WheelDipPerNotch, horizontal: true, shift: false);
+            Advance(fixture, 6);
+        }
+
+        for (var i = 0; i < 90; i++)
+        {
+            Advance(fixture, 1);
+        }
+
+        Assert.Equal(5, controller.Pager.SelectedIndex);
+        Assert.Equal(5.0, Position(controller), 3);
+    }
+
+    [Fact]
+    public void WheelDuringTheSnapQueuesFromTheTargetPage()
+    {
+        var (fixture, controller) = Create();
+        using var _fixture = fixture;
+
+        controller.HandleWheel(PagerConstants.WheelDipPerNotch, horizontal: false, shift: false);
+        controller.HandleWheel(PagerConstants.WheelDipPerNotch, horizontal: false, shift: false);
+        Advance(fixture, 4); // ~67 ms into the 0.38 s snap: the spring is still running
+        Assert.True(controller.Pager.IsAnimating);
+
+        fixture.Time.Advance(TimeSpan.FromMilliseconds(PagerConstants.WheelCooldownMs + 20));
+        controller.HandleWheel(PagerConstants.WheelDipPerNotch, horizontal: false, shift: false);
+        controller.HandleWheel(PagerConstants.WheelDipPerNotch, horizontal: false, shift: false);
+        for (var i = 0; i < 120; i++)
+        {
+            Advance(fixture, 1);
+        }
+
+        Assert.Equal(2, controller.Pager.SelectedIndex);
+        Assert.Equal(2.0, Position(controller), 3);
+    }
+
+    [Fact]
+    public void SlowShortDragSnapsBackWithoutChangingPage()
+    {
+        var (fixture, controller) = Create();
+        using var _fixture = fixture;
+        var pager = controller.Pager;
+        var x0 = 260.0;
+        var t = 0L;
+
+        pager.BeginDrag(x0, t);
+        for (var i = 1; i <= 12; i++)
+        {
+            t += 33;
+            pager.DragTo(x0 - (i * 10), t); // 120 DIP of travel over ~400 ms: a slow, deliberate drag
+            Advance(fixture, 2);
+        }
+
+        pager.EndDrag(t);
+        for (var i = 0; i < 90; i++)
+        {
+            Advance(fixture, 1);
+        }
+
+        Assert.Equal(0, pager.SelectedIndex);
+        Assert.Equal(0.0, Position(controller), 3);
+    }
+
+    [Fact]
+    public void SlowHalfPageDragCommitsTheNearestPage()
+    {
+        var (fixture, controller) = Create();
+        using var _fixture = fixture;
+        var pager = controller.Pager;
+        var x0 = 260.0;
+        var t = 0L;
+
+        pager.BeginDrag(x0, t);
+        for (var i = 1; i <= 20; i++)
+        {
+            t += 33;
+            pager.DragTo(x0 - (i * 12), t); // 240 DIP raw -> 204 DIP damped = 0.51 page
+            Advance(fixture, 2);
+        }
+
+        pager.EndDrag(t);
+        for (var i = 0; i < 90; i++)
+        {
+            Advance(fixture, 1);
+        }
+
+        Assert.Equal(1, pager.SelectedIndex);
+        Assert.Equal(1.0, Position(controller), 3);
+    }
+
+    [Fact]
+    public void FastFlickTurnsExactlyOnePage()
+    {
+        var (fixture, controller) = Create();
+        using var _fixture = fixture;
+        var pager = controller.Pager;
+        var x0 = 260.0;
+        var t = 0L;
+
+        pager.BeginDrag(x0, t);
+        for (var i = 1; i <= 6; i++)
+        {
+            t += 16;
+            pager.DragTo(x0 - (i * 12), t); // 0.75 DIP/ms: a flick
+            Advance(fixture, 1);
+        }
+
+        pager.EndDrag(t);
+        for (var i = 0; i < 90; i++)
+        {
+            Advance(fixture, 1);
+        }
+
+        Assert.Equal(1, pager.SelectedIndex);
+        Assert.Equal(1.0, Position(controller), 3);
+    }
+
+    [Fact]
+    public void DragThatReversesBelowHalfAPageSettlesBackWhereItStarted()
+    {
+        var (fixture, controller) = Create();
+        using var _fixture = fixture;
+        var pager = controller.Pager;
+        var x0 = 260.0;
+        var t = 0L;
+
+        pager.BeginDrag(x0, t);
+        for (var i = 1; i <= 13; i++)
+        {
+            t += 16;
+            pager.DragTo(x0 - (i * 20), t); // out to 260 DIP (0.55 page damped)
+            Advance(fixture, 1);
+        }
+
+        for (var i = 8; i >= 5; i--)
+        {
+            t += 50;
+            pager.DragTo(x0 - (i * 20), t); // back to 100 DIP and pause: no release momentum
+            Advance(fixture, 3);
+        }
+
+        Advance(fixture, 7);
+        pager.EndDrag(t);
+        for (var i = 0; i < 90; i++)
+        {
+            Advance(fixture, 1);
+        }
+
+        Assert.Equal(0, pager.SelectedIndex);
+        Assert.Equal(0.0, Position(controller), 3);
+    }
+}
+

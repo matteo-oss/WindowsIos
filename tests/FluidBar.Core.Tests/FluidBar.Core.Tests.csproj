@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- Test naming follows the Given_When_Then convention and helper members are intentionally
+         non-static in a few fixtures; these analyzer rules are production-code guidance only. -->
+    <NoWarn>$(NoWarn);CA1707;CA1822;CA2007;CA1305;CA1515</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FluidBar.Core\FluidBar.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared M6 contract: the recording/replay format and soak budgets are authored once in the
+         soak harness and linked into the regression suite so both consume the same source of truth.
+         Fixtures are embedded so replay tests run without file-system fixtures. -->
+    <Compile Include="..\FluidBar.Soak\Recording\**\*.cs" Link="Soak\Recording\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\FluidBar.Soak\SoakBudgets.cs" Link="Soak\SoakBudgets.cs" />
+    <EmbeddedResource Include="..\FluidBar.Soak\Fixtures\*.json" Link="Fixtures\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

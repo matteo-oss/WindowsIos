@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 2,
+  "id": "fluidbar-file-shelf",
+  "version": "1.0.3",
+  "apiVersion": "2.1.0",
+  "dependencies": {
+    "sdk": "^2.1.0"
+  },
+  "minAppVersion": "4.1.0",
+  "publisher": {
+    "id": "fluidbar",
+    "displayName": "FluidBar",
+    "url": "https://fluidbar.doulor.cn",
+    "keyId": "fluidbar-official"
+  },
+  "author": {
+    "name": "FluidBar contributors"
+  },
+  "name": {
+    "en-US": "File storage",
+    "zh-Hans": "文件存放"
+  },
+  "summary": {
+    "en-US": "An optional reference-only file shelf with copy-only dragging.",
+    "zh-Hans": "可选安装的文件暂存，仅保留引用，拖出时复制。"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/Doulor/FluidBar",
+  "entry": {
+    "runtime": "inproc",
+    "assembly": "plugin/FluidBar.Plugins.FileShelf.dll",
+    "type": "FluidBar.Plugins.FileShelf.FileShelfPlugin",
+    "targetFramework": "net10.0"
+  },
+  "platforms": [
+    "win-x64"
+  ],
+  "locales": {
+    "default": "en-US",
+    "available": [
+      "en-US",
+      "zh-Hans"
+    ],
+    "path": "locales",
+    "fallback": "en-US"
+  },
+  "capabilities": {
+    "clipboard": {
+      "read": false,
+      "write": true,
+      "reason": "Copies explicitly selected shelf files to the clipboard when you click Copy. Does not read the clipboard."
+    },
+    "ui": {
+      "island": true,
+      "settings": true,
+      "commands": true,
+      "pages": true,
+      "xaml": false
+    },
+    "files": {
+      "read": [
+        "$PLUGIN_DATA"
+      ],
+      "write": [
+        "$PLUGIN_DATA"
+      ],
+      "reason": "Stores only explicitly selected file paths in plugin data. The host provides user-selected file pick/drop and copy-only drag UI. Original files are never moved or deleted."
+    }
+  },
+  "activation": [
+    "startup"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "fluidbar-file-shelf.copy",
+        "title": { "en-US": "Copy file", "zh-Hans": "复制文件" },
+        "contexts": ["island"]
+      },
+      {
+        "id": "fluidbar-file-shelf.copy-all",
+        "title": { "en-US": "Copy all files", "zh-Hans": "复制全部文件" },
+        "contexts": ["global", "island", "settings"]
+      },
+      {
+        "id": "fluidbar-file-shelf.remove",
+        "title": { "en-US": "Remove reference", "zh-Hans": "移除引用" },
+        "contexts": ["island"]
+      },
+      {
+        "id": "fluidbar-file-shelf.next",
+        "title": { "en-US": "Next page", "zh-Hans": "下一页" },
+        "contexts": ["island"]
+      },
+      {
+        "id": "fluidbar-file-shelf.previous",
+        "title": { "en-US": "Previous page", "zh-Hans": "上一页" },
+        "contexts": ["island"]
+      },
+      {
+        "id": "fluidbar-file-shelf.clear",
+        "title": {
+          "en-US": "Clear references",
+          "zh-Hans": "清空引用"
+        },
+        "contexts": [
+          "global",
+          "island",
+          "settings"
+        ]
+      }
+    ],
+    "settingsPages": [
+      {
+        "id": "shelf",
+        "title": {
+          "en-US": "File storage",
+          "zh-Hans": "文件存放"
+        },
+        "controls": [
+          {
+            "type": "button",
+            "key": "action.clear",
+            "command": "fluidbar-file-shelf.clear",
+            "title": {
+              "en-US": "Clear references",
+              "zh-Hans": "清空引用"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

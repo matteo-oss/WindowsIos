@@ -1,0 +1,15 @@
+name = "fluidbar-telemetry"
+main = "src/index.js"
+compatibility_date = "2026-10-28"
+
+# Custom domain (Cloudflare creates the DNS record). Comment out to test on *.workers.dev first.
+routes = [{ pattern = "t.fluidbar.doulor.cn", custom_domain = true }]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fluidbar_telemetry"
+database_id = "106dac81-2864-4224-bb4d-832324628a51"
+
+[triggers]
+# Daily retention plus hourly refresh of public download totals.
+crons = ["17 3 * * *", "7 * * * *"]

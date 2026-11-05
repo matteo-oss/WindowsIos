@@ -1,0 +1,498 @@
+using FluidBar.App.Hosting.Skia;
+using FluidBar.App.Settings;
+using FluidBar.Core.Diagnostics;
+using FluidBar.Platform.Windows.Focus;
+using FluidBar.Platform.Windows.Notifications;
+using FluidBar.Platform.Windows.Radios;
+using FluidBar.Platform.Windows.Shell;
+using FluidBar.Platform.Windows.Tasks;
+using FluidBar.Platform.Windows.Threading;
+
+namespace FluidBar.Ui.Tests;
+
+/// <summary>
+/// Headless tests for the production seam adapter. No platform service is started: the tests pin the
+/// unsupported/deferred contract (exact reasons, no fake success), the Windows theme toggle and
+/// the injected quick-toggle services (Wi-Fi/Bluetooth/Focus) with in-memory fakes.
+/// </summary>
+public sealed class SkiaPlatformActionsTests
+{
+    [Fact]
+    public async Task UnstartedServices_ReportUnsupportedWithTheMissingService()
+    {
+        var settings = CreateSettings();
+        await using var actions = new SkiaPlatformActions(settings);
+
+        AssertUnsupported(actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.VolumeSet, Value: 0.5)), "VolumeMonitor");
+        AssertUnsupported(actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.VolumeMute)), "VolumeMonitor");
+        AssertUnsupported(actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.BrightnessSet, Value: 0.5)), "BrightnessMonitor");
+        AssertUnsupported(actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.MediaTogglePlay)), "GsmtcMediaSessionService");
+        AssertUnsupported(actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.MediaSeek, Value: 0.5)), "GsmtcMediaSessionService");
+
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task MediaQueue_WithoutASession_ReportsThePlayerUnavailable()
+    {
+        var settings = CreateSettings();
+        await using var actions = new SkiaPlatformActions(settings);
+
+        AssertUnsupported(
+            actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.MediaQueue)),
+            "no active media session to open");
+
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task UnstartedQuickToggles_ReportThatTheServiceIsNotRunning()
+    {
+        var settings = CreateSettings();
+        await using var actions = new SkiaPlatformActions(settings);
+
+        AssertUnsupported(
+            actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.QuickToggle, Toggle: IslandQuickToggle.Wifi)),
+            "Wi-Fi radio service is not running");
+        AssertUnsupported(
+            actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.QuickToggle, Toggle: IslandQuickToggle.Bluetooth)),
+            "Bluetooth radio service is not running");
+
+
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task ClipboardSearchQuery_RoundTripsAndClears()
+    {
+        var settings = CreateSettings();
+        await using var actions = new SkiaPlatformActions(settings);
+
+        actions.SetClipboardSearchQuery("needle");
+        Assert.Equal("needle", actions.ClipboardSearchQuery);
+
+        actions.SetClipboardSearchQuery(null);
+        Assert.Null(actions.ClipboardSearchQuery);
+
+        settings.Dispose();
+    }
+
+    [Theory]
+    [InlineData(AppTheme.System)]
+    [InlineData(AppTheme.Dark)]
+    [InlineData(AppTheme.Light)]
+    public async Task ThemeQuickToggle_PreservesTheAppThemePreference(AppTheme preference)
+    {
+        var store = new InMemoryUiSettingsStore(AppSettings.Default with { Theme = preference });
+        using var settings = new SettingsController(store.LastSaved, store, NullAppLogger.Instance);
+        var switcher = new FakeSystemThemeSwitcher();
+        await using var actions = new SkiaPlatformActions(settings, themeSwitcher: switcher);
+        var changes = 0;
+        actions.Changed += (_, _) => Interlocked.Increment(ref changes);
+
+        var first = actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.QuickToggle, Toggle: IslandQuickToggle.Theme));
+        Assert.Equal(IslandActionOutcome.Handled, first.Outcome);
+        await WaitUntilAsync(() => Volatile.Read(ref changes) == 1);
+        Assert.True(switcher.IsLight);
+        Assert.Equal(preference, settings.Current.Theme);
+
+        var second = actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.QuickToggle, Toggle: IslandQuickToggle.Theme));
+        Assert.Equal(IslandActionOutcome.Handled, second.Outcome);
+        await WaitUntilAsync(() => Volatile.Read(ref changes) == 2);
+        Assert.False(switcher.IsLight);
+        Assert.Equal(preference, settings.Current.Theme);
+    }
+
+    private sealed class FakeSystemThemeSwitcher : ISystemThemeSwitcher
+    {
+        public bool IsLight { get; private set; }
+
+        public Task ToggleAsync(CancellationToken cancellationToken = default)
+        {
+            IsLight = !IsLight;
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task ThemeQuickToggle_FailureIsLoggedWithoutChangingTheAppPreference()
+    {
+        using var settings = CreateSettings();
+        var logger = new RecordingAppLogger();
+        await using var actions = new SkiaPlatformActions(settings, logger,
+            themeSwitcher: new FailingSystemThemeSwitcher());
+        var changed = false;
+        actions.Changed += (_, _) => changed = true;
+
+        actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.QuickToggle, Toggle: IslandQuickToggle.Theme));
+        await WaitUntilAsync(() => logger.HasEvent("island.actions.theme-toggle-failed"));
+
+        Assert.False(changed);
+        Assert.Equal(AppTheme.System, settings.Current.Theme);
+    }
+
+    private sealed class FailingSystemThemeSwitcher : ISystemThemeSwitcher
+    {
+        public Task ToggleAsync(CancellationToken cancellationToken = default)
+            => Task.FromException(new UnauthorizedAccessException("Theme preferences are read-only."));
+    }
+
+    [Fact]
+    public async Task WifiQuickToggle_FlipsTheInjectedRadioService()
+    {
+        var settings = CreateSettings();
+        var wifi = new FakeRadioToggleService(new RadioSnapshot(
+            PlatformRadioKind.Wifi, RadioAvailability.Available, true, "WLAN"));
+        var bluetooth = new FakeRadioToggleService(new RadioSnapshot(
+            PlatformRadioKind.Bluetooth, RadioAvailability.Available, true, "Bluetooth"));
+        var focus = new FakeFocusAssistService(new FocusAssistSnapshot(false, FocusAssistAvailability.Available));
+        await using var actions = CreateActions(settings, wifi, bluetooth, focus);
+
+        var result = actions.Invoke(new IslandPlatformAction(
+            IslandPlatformActionKind.QuickToggle, Toggle: IslandQuickToggle.Wifi));
+
+        Assert.Equal(IslandActionOutcome.Handled, result.Outcome);
+        await WaitUntilAsync(() => wifi.Requests.Count == 1);
+        Assert.False(wifi.Requests[0]);
+        Assert.False(actions.IsWifiEnabled);
+        Assert.True(actions.IsBluetoothEnabled);
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task BluetoothQuickToggle_FlipsTheInjectedRadioService()
+    {
+        var settings = CreateSettings();
+        var wifi = new FakeRadioToggleService(new RadioSnapshot(
+            PlatformRadioKind.Wifi, RadioAvailability.Available, true, "WLAN"));
+        var bluetooth = new FakeRadioToggleService(new RadioSnapshot(
+            PlatformRadioKind.Bluetooth, RadioAvailability.Available, false, "Bluetooth"));
+        var focus = new FakeFocusAssistService(new FocusAssistSnapshot(false, FocusAssistAvailability.Available));
+        await using var actions = CreateActions(settings, wifi, bluetooth, focus);
+
+        var result = actions.Invoke(new IslandPlatformAction(
+            IslandPlatformActionKind.QuickToggle, Toggle: IslandQuickToggle.Bluetooth));
+
+        Assert.Equal(IslandActionOutcome.Handled, result.Outcome);
+        await WaitUntilAsync(() => bluetooth.Requests.Count == 1);
+        Assert.True(bluetooth.Requests[0]);
+        Assert.True(actions.IsBluetoothEnabled);
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task QuickToggleWithoutAdapter_ReportsUnsupportedWithTheExactReason()
+    {
+        var settings = CreateSettings();
+        var wifi = new FakeRadioToggleService(RadioSnapshot.NoAdapter(PlatformRadioKind.Wifi));
+        var bluetooth = new FakeRadioToggleService(RadioSnapshot.NoAdapter(PlatformRadioKind.Bluetooth));
+        var focus = new FakeFocusAssistService(new FocusAssistSnapshot(false, FocusAssistAvailability.Available));
+        await using var actions = CreateActions(settings, wifi, bluetooth, focus);
+
+        AssertUnsupported(
+            actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.QuickToggle, Toggle: IslandQuickToggle.Wifi)),
+            "no Wi-Fi radio");
+        AssertUnsupported(
+            actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.QuickToggle, Toggle: IslandQuickToggle.Bluetooth)),
+            "no Bluetooth radio");
+        Assert.Empty(wifi.Requests);
+        Assert.Empty(bluetooth.Requests);
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task SetWifiEnabledAsync_ExposesTheServiceResult()
+    {
+        var settings = CreateSettings();
+        var wifi = new FakeRadioToggleService(new RadioSnapshot(
+            PlatformRadioKind.Wifi, RadioAvailability.Available, true, "WLAN"));
+        var bluetooth = new FakeRadioToggleService(new RadioSnapshot(
+            PlatformRadioKind.Bluetooth, RadioAvailability.Available, true, "Bluetooth"));
+        var focus = new FakeFocusAssistService(new FocusAssistSnapshot(false, FocusAssistAvailability.Available));
+        await using var actions = CreateActions(settings, wifi, bluetooth, focus);
+
+        var result = await actions.SetWifiEnabledAsync(false);
+
+        Assert.True(result.Succeeded);
+        Assert.False(actions.IsWifiEnabled);
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task NotificationActivate_WithoutAListenerRow_IsUnsupported()
+    {
+        var settings = CreateSettings();
+        await using var actions = new SkiaPlatformActions(settings);
+
+        // No listener row exists in this fixture; activation must report unsupported instead of
+        // pretending to open an app.
+        var result = actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.NotificationActivate, Index: 2));
+
+        Assert.Equal(IslandActionOutcome.Unsupported, result.Outcome);
+
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task NotificationDismiss_WithoutAListenerRow_IsUnsupported()
+    {
+        var settings = CreateSettings();
+        await using var actions = new SkiaPlatformActions(settings);
+
+        // The listener is not started here, so there is no row to dismiss: report it, never fake success.
+        AssertUnsupported(
+            actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.NotificationDismiss, Index: 0)),
+            "no longer exists");
+
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task TaskToggle_WithoutTaskData_IsUnsupported()
+    {
+        var settings = CreateSettings();
+        await using var actions = new SkiaPlatformActions(settings);
+
+        AssertUnsupported(
+            actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.TaskToggle, Index: 0)),
+            "tasks.json");
+
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task WidgetsContent_WithoutRealData_IsExplicitlyEmpty()
+    {
+        var settings = CreateSettings();
+        await using var actions = new SkiaPlatformActions(settings);
+
+        var content = actions.Snapshot();
+
+        Assert.Null(content.WeatherTemp);
+        Assert.Null(content.WeatherHighLow);
+        Assert.Empty(content.Tasks);
+        Assert.NotNull(content.TasksEmptyHint);
+        Assert.Equal("Add your first task", content.TasksEmptyHint!);
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task TaskToggle_WritesTheConfiguredTaskFile()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "fluidbar-ui-tasks-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "tasks.json");
+        await File.WriteAllTextAsync(path,
+            """[ { "title": "Alpha", "done": false }, { "title": "Beta", "done": true } ]""");
+        try
+        {
+            var settings = CreateSettings();
+            await using var actions = new SkiaPlatformActions(settings, logger: null, timeProvider: null,
+                quickToggles: null, localizer: null, weatherOptions: null,
+                taskOptions: new TaskListOptions
+                {
+                    FilePath = path,
+                    ReloadInterval = TimeSpan.FromSeconds(1),
+                });
+
+            await actions.TaskSource.StartAsync();
+            await WaitUntilAsync(() => actions.TaskSource.Current is not null);
+            Assert.Equal(2, actions.Snapshot().Tasks.Length);
+
+            var result = actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.TaskToggle, Index: 0));
+
+            Assert.Equal(IslandActionOutcome.Handled, result.Outcome);
+            await WaitUntilAsync(() => actions.TaskSource.Current is { } current && current.Items[0].Done);
+            var json = await File.ReadAllTextAsync(path);
+            Assert.Contains("\"title\": \"Alpha\"", json, StringComparison.Ordinal);
+            Assert.Contains("\"done\": true", json, StringComparison.Ordinal);
+            await actions.TaskSource.StopAsync();
+            settings.Dispose();
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best effort.
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ClipboardCopyWithoutText_IsUnsupported()
+    {
+        var settings = CreateSettings();
+        await using var actions = new SkiaPlatformActions(settings);
+
+        AssertUnsupported(
+            actions.Invoke(new IslandPlatformAction(IslandPlatformActionKind.ClipboardCopy, Text: "")),
+            "no text to copy");
+
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task NotificationListener_IsOneSharedInstanceForPageAndPlugin()
+    {
+        var settings = CreateSettings();
+        await using var actions = new SkiaPlatformActions(settings);
+
+        var view = Assert.IsType<NewArrivalsNotificationSource>(actions.PluginNotificationSource);
+
+        // The plugin path wraps the very listener the notification page maps: one read loop.
+        Assert.Same(actions.NotificationSource, view.Inner);
+        // The view is created once (a plugin-runtime restart must not re-baseline and swallow arrivals).
+        Assert.Same(view, actions.PluginNotificationSource);
+        settings.Dispose();
+    }
+
+    [Fact]
+    public async Task DisposeAsync_ReleasesTheSharedListenerOnce()
+    {
+        var settings = CreateSettings();
+        var actions = new SkiaPlatformActions(settings);
+
+        await actions.DisposeAsync();
+        await actions.DisposeAsync();
+
+        settings.Dispose();
+    }
+
+    private static SkiaPlatformActions CreateActions(SettingsController settings,
+        FakeRadioToggleService wifi, FakeRadioToggleService bluetooth, FakeFocusAssistService focus)
+        => new(settings, logger: null, timeProvider: null,
+            new IslandQuickToggleServices(wifi, bluetooth, focus));
+
+    private static SettingsController CreateSettings()
+    {
+        var store = new InMemoryUiSettingsStore(AppSettings.Default);
+        return new SettingsController(store.LastSaved, store, NullAppLogger.Instance);
+    }
+
+    private static void AssertUnsupported(IslandActionResult result, string reasonFragment)
+    {
+        Assert.Equal(IslandActionOutcome.Unsupported, result.Outcome);
+        Assert.False(string.IsNullOrWhiteSpace(result.Reason));
+        Assert.Contains(reasonFragment, result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException("The quick-toggle service was not called within the timeout.");
+            }
+
+            await Task.Delay(10);
+        }
+    }
+}
+
+/// <summary>In-memory radio toggle service for the App adapter tests (no hardware).</summary>
+internal sealed class FakeRadioToggleService : IRadioToggleService
+{
+    public FakeRadioToggleService(RadioSnapshot snapshot) => Current = snapshot;
+
+    public PlatformRadioKind Kind => Current!.Kind;
+
+    public PlatformMonitorState State { get; set; } = PlatformMonitorState.Running;
+
+    public RadioSnapshot? Current { get; set; }
+
+    public bool? IsEnabled => Current?.IsEnabled;
+
+    public List<bool> Requests { get; } = [];
+
+    public event EventHandler<SnapshotEventArgs<RadioSnapshot>>? SnapshotChanged;
+
+    public Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        State = PlatformMonitorState.Running;
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        State = PlatformMonitorState.Stopped;
+        return Task.CompletedTask;
+    }
+
+    public Task RefreshAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    public Task<RadioToggleResult> SetEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        Requests.Add(enabled);
+        if (!Current!.CanToggle)
+        {
+            return Task.FromResult(RadioToggleResult.Unsupported(
+                Current.Reason ?? $"{Kind} radio is unavailable", Current));
+        }
+
+        Current = Current with { IsEnabled = enabled };
+        SnapshotChanged?.Invoke(this, new SnapshotEventArgs<RadioSnapshot>(Current));
+        return Task.FromResult(RadioToggleResult.Success(Current));
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        State = PlatformMonitorState.Disposed;
+        return ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>In-memory focus toggle service for the App adapter tests (no focus session).</summary>
+internal sealed class FakeFocusAssistService : IFocusAssistService
+{
+    public FakeFocusAssistService(FocusAssistSnapshot snapshot) => Current = snapshot;
+
+    public PlatformMonitorState State { get; set; } = PlatformMonitorState.Running;
+
+    public FocusAssistSnapshot? Current { get; set; }
+
+    public bool? IsActive => Current?.IsActive;
+
+    public List<bool> Requests { get; } = [];
+
+    public event EventHandler<SnapshotEventArgs<FocusAssistSnapshot>>? SnapshotChanged;
+
+    public Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        State = PlatformMonitorState.Running;
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        State = PlatformMonitorState.Stopped;
+        return Task.CompletedTask;
+    }
+
+    public Task RefreshAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    public Task<FocusToggleResult> SetActiveAsync(bool active, CancellationToken cancellationToken = default)
+    {
+        Requests.Add(active);
+        if (!Current!.CanToggle)
+        {
+            return Task.FromResult(FocusToggleResult.Unsupported(
+                Current.Reason ?? "focus sessions are unavailable", Current));
+        }
+
+        Current = Current with { IsActive = active };
+        SnapshotChanged?.Invoke(this, new SnapshotEventArgs<FocusAssistSnapshot>(Current));
+        return Task.FromResult(FocusToggleResult.Success(Current));
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        State = PlatformMonitorState.Disposed;
+        return ValueTask.CompletedTask;
+    }
+}

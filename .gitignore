@@ -1,0 +1,39 @@
+# Build output
+build/
+bin/
+obj/
+publish/
+artifacts/
+TestResults/
+
+# IDE / local
+.vs/
+*.user
+*.suo
+*.cache
+*.bak
+*.log
+.playwright-cli/
+
+# Local agent / tooling state
+.superpowers/
+.claude/
+.wrangler/
+
+# Prototype review artifacts (screenshots are regenerated on demand)
+docs/rewrite/prototype/_shots/
+
+# Generated sync screenshots
+artifacts-sync/
+
+# Misc
+*.zip
+example.txt
+
+third_party/
+
+# Tool artefact: ImageMagick expands %SystemDrive% literally
+%SystemDrive%/
+
+# Local-only keys, notes and handoff artifacts (never commit private material)
+.local/
