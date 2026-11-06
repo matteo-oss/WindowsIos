@@ -14,16 +14,16 @@ public static class LiquidGlassTokens
     /// Shell fill opacity while the liquid-glass tier is active (the opacity slider is bypassed). Slightly
     /// clearer than the acrylic tier so the desktop keeps showing through under the baked shadow.
     /// </summary>
-    public const double FillOpacity = 0.68;
+    public const double FillOpacity = 0.52;
 
     /// <summary>Tint alpha painted over the blurred backdrop (backdrop mode).</summary>
-    public const double BackdropTintAlpha = 0.30;
+    public const double BackdropTintAlpha = 0.16;
 
-    /// <summary>Adaptive tint range: the selected 30 % tint scales between these bounds with backdrop luminance.</summary>
-    public const double BackdropTintMinFactor = 0.90;
+    /// <summary>Adaptive tint range: the translucent tint scales between these bounds with backdrop luminance.</summary>
+    public const double BackdropTintMinFactor = 0.72;
 
     /// <summary>Adaptive tint upper bound.</summary>
-    public const double BackdropTintMaxFactor = 1.15;
+    public const double BackdropTintMaxFactor = 1.05;
 
     /// <summary>
     /// Vibrancy scrim: extra background wash behind the top text band when the backdrop is bright.
@@ -32,10 +32,16 @@ public static class LiquidGlassTokens
     public const double ScrimLuminanceThreshold = 0.45;
 
     /// <summary>Peak scrim alpha (top edge) on a fully bright backdrop.</summary>
-    public const double ScrimMaxAlpha = 0.30;
+    public const double ScrimMaxAlpha = 0.18;
 
     /// <summary>White haze added on dark desktops so the slab still reads as glass (0.05 on pure black).</summary>
-    public const double HazeMaxAlpha = 0.05;
+    public const double HazeMaxAlpha = 0.035;
+
+    /// <summary>Translucent fill for cards and rows floating inside the glass shell.</summary>
+    public const double ComponentFillAlpha = 0.12;
+
+    /// <summary>Subtle inner key line that separates a component without turning it into a grey tile.</summary>
+    public const double ComponentEdgeAlpha = 0.16;
 
     /// <summary>Height of the scrim gradient as a fraction of the shell height.</summary>
     public const double ScrimHeightFactor = 0.55;

@@ -334,7 +334,7 @@ internal sealed partial class AppBootstrap
 
         try
         {
-            await _shell.ShowBalloonAsync("FluidBar", message).ConfigureAwait(true);
+            await _shell.ShowBalloonAsync("flutter", message).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -1227,7 +1227,7 @@ internal sealed partial class AppBootstrap
         var label = _localizer?.Get(LocKeys.Clipboard.Search) ?? "Search";
         var window = new ClipboardSearchWindow(
             query => _platformActions?.SetClipboardSearchQuery(query),
-            $"{label} — FluidBar",
+            $"{label} — flutter",
             label,
             _localizer?.Get(LocKeys.Clipboard.SearchHint) ?? "Esc closes and clears the filter",
             _platformActions?.ClipboardSearchQuery);

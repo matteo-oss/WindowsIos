@@ -690,7 +690,6 @@ public static class SettingsSectionBuilder
                     [
                         (ctx.Localizer.Get(LocKeys.Settings.Island.Mode.Float), "float"),
                         (ctx.Localizer.Get(LocKeys.Settings.Island.Mode.Flush), "flush"),
-                        (ctx.Localizer.Get(LocKeys.Settings.Island.Mode.Dock), "dock"),
                     ],
                     settings.Mode,
                     value => ctx.Settings.Update(s => s with { Mode = value })),

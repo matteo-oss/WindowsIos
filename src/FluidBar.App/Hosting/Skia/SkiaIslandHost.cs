@@ -914,7 +914,7 @@ public sealed partial class SkiaIslandHost : IDisposable, IFrameStatsSource
                 // Every frame uploads the whole surface: partial uploads on a per-pixel-alpha layered
                 // window can compose the untouched region as transparent ("island flashes").
                 FullFrameCommits = true,
-                WindowTitle = "FluidBar Island",
+                WindowTitle = "flutter",
             },
             _interop,
             _platformLogger,

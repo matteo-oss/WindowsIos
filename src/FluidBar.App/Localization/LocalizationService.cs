@@ -102,7 +102,7 @@ public sealed class LocalizationService : ILocalizer, IDisposable
     public bool ShowMissingKeys => _showMissingKeys;
 
     /// <summary>
-    /// Loads the embedded app catalogs from <c>avares://FluidBar/Localization/&lt;locale&gt;.json</c>,
+    /// Loads the embedded app catalogs from the current app assembly's localization resources,
     /// generates the pseudo-locale from <c>en-US</c>, and returns a ready service.
     /// </summary>
     /// <param name="initialCulture">Initial culture; <see langword="null"/> resolves the system UI culture.</param>
@@ -130,7 +130,9 @@ public sealed class LocalizationService : ILocalizer, IDisposable
     public static LocalizationCatalog LoadEmbedded(string locale)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(locale);
-        var uri = new Uri($"avares://FluidBar/Localization/{locale}.json");
+        var assemblyName = typeof(LocalizationService).Assembly.GetName().Name
+            ?? throw new InvalidOperationException("The app assembly name is unavailable.");
+        var uri = new Uri($"avares://{assemblyName}/Localization/{locale}.json");
         using var stream = AssetLoader.Open(uri);
         using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         return JsonCatalogParser.Parse(reader.ReadToEnd(), locale);

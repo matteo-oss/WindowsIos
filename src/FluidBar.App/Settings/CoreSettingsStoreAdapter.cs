@@ -275,7 +275,7 @@ public sealed class CoreSettingsStoreAdapter : IUiSettingsStore, IDisposable
             Mode = core.Island.Mode switch
             {
                 FluidBar.Core.Layout.IslandMode.Flush => "flush",
-                FluidBar.Core.Layout.IslandMode.Dock => "dock",
+                FluidBar.Core.Layout.IslandMode.Dock => "float",
                 _ => "float",
             },
             Anchor = core.Island.Anchor switch
@@ -397,7 +397,6 @@ public sealed class CoreSettingsStoreAdapter : IUiSettingsStore, IDisposable
                 Mode = app.Mode switch
                 {
                     "flush" => FluidBar.Core.Layout.IslandMode.Flush,
-                    "dock" => FluidBar.Core.Layout.IslandMode.Dock,
                     _ => FluidBar.Core.Layout.IslandMode.Float,
                 },
                 Anchor = app.Anchor switch

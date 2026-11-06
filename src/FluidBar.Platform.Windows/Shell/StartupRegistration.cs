@@ -133,7 +133,7 @@ public sealed class StartupRegistrationService
     public const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
 
     /// <summary>Default value name used for the app.</summary>
-    public const string DefaultValueName = "FluidBar";
+    public const string DefaultValueName = "flutter";
 
     private readonly IRegistryValueStore _store;
     private readonly IPlatformLogger _logger;

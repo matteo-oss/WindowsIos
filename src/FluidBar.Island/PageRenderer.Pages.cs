@@ -1156,9 +1156,12 @@ internal sealed partial class PageRenderer
         _fill.Color = selected
             ? Alpha(_theme.Accent, 0.10f * _opacity)
             : hovered
-                ? Alpha(Mix(_theme.BackgroundRaised, SKColors.White, 0.06f), _opacity)
-                : Alpha(_theme.BackgroundRaised, _opacity);
+                ? _theme.Material == IslandMaterial.LiquidGlass
+                    ? ComponentFill(1.5f)
+                    : Alpha(Mix(_theme.BackgroundRaised, SKColors.White, 0.06f), _opacity)
+                : ComponentFill();
         canvas.DrawRoundRect(row, PageLayout.ListRowRadius, PageLayout.ListRowRadius, _fill);
+        DrawComponentEdge(canvas, row, PageLayout.ListRowRadius);
     }
 
     private SKColor Tone(CompactStatus status) => status switch

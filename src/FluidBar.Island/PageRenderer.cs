@@ -374,9 +374,12 @@ internal sealed partial class PageRenderer : IDisposable
             var alpha = (enabled ? 1f : 0.45f) * _opacity;
             _fill.Style = SKPaintStyle.Fill;
             _fill.Color = !enabled
-                ? Alpha(_theme.BackgroundRaised, 0.55f * _opacity)
-                : Alpha(toggle.IsOn ? _theme.Accent : _theme.BackgroundRaised, toggle.IsOn ? 0.10f * _opacity : _opacity);
+                ? ComponentFill(0.55f)
+                : toggle.IsOn
+                    ? Alpha(_theme.Accent, 0.14f * _opacity)
+                    : ComponentFill();
             canvas.DrawRoundRect(rect, 10, 10, _fill);
+            DrawComponentEdge(canvas, rect, 10);
             if (IsHovered(IslandPageControl.QuickToggle, i) || IsPressed(IslandPageControl.QuickToggle, i))
             {
                 _fill.Color = Alpha(toggle.IsOn ? _theme.Accent : _theme.Foreground,
@@ -816,8 +819,29 @@ internal sealed partial class PageRenderer : IDisposable
     private void DrawCard(SKCanvas canvas, SKRect rect, float radius)
     {
         _fill.Style = SKPaintStyle.Fill;
-        _fill.Color = Alpha(_theme.BackgroundRaised, _opacity);
+        _fill.Color = ComponentFill();
         canvas.DrawRoundRect(rect, radius, radius, _fill);
+        DrawComponentEdge(canvas, rect, radius);
+    }
+
+    private SKColor ComponentFill(float strength = 1f)
+        => _theme.Material == IslandMaterial.LiquidGlass
+            ? Alpha(_theme.IsLight ? SKColors.Black : SKColors.White,
+                (float)LiquidGlassTokens.ComponentFillAlpha * strength * _opacity)
+            : Alpha(_theme.BackgroundRaised, strength * _opacity);
+
+    private void DrawComponentEdge(SKCanvas canvas, SKRect rect, float radius)
+    {
+        if (_theme.Material != IslandMaterial.LiquidGlass)
+        {
+            return;
+        }
+
+        _stroke.Style = SKPaintStyle.Stroke;
+        _stroke.StrokeWidth = 0.8f;
+        _stroke.Color = Alpha(_theme.IsLight ? SKColors.Black : SKColors.White,
+            (float)LiquidGlassTokens.ComponentEdgeAlpha * _opacity);
+        canvas.DrawRoundRect(rect.Deflate(0.4f), Math.Max(0, radius - 0.4f), Math.Max(0, radius - 0.4f), _stroke);
     }
 
     private void DrawArt(SKCanvas canvas, SKRect rect, float radius, SKColor accent, bool large,

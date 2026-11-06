@@ -59,7 +59,7 @@ public sealed class CoreSettingsAdapterTests
         Assert.Equal(CoreAppTheme.Light, mapped.Appearance.Theme);
         Assert.Equal(FluidBar.Core.Settings.IslandMaterial.Acrylic, mapped.Appearance.Material);
         Assert.Equal(FluidBar.Core.Settings.ColorPalette.Nord, mapped.Appearance.Palette);
-        Assert.Equal(FluidBar.Core.Layout.IslandMode.Dock, mapped.Island.Mode);
+        Assert.Equal(FluidBar.Core.Layout.IslandMode.Float, mapped.Island.Mode);
         Assert.Equal(FluidBar.Core.Layout.IslandAnchor.BottomRight, mapped.Island.Anchor);
         Assert.Equal(FluidBar.Core.Settings.StackingPreference.Latest, mapped.Island.Stacking);
         Assert.Equal(FluidBar.Core.Settings.DisplayTarget.All, mapped.Island.DisplayOn);
@@ -169,7 +169,7 @@ public sealed class CoreSettingsAdapterTests
         using var reloaded = new CoreSettingsStoreAdapter(reloadedStore, logger);
         var loaded = await reloaded.LoadAsync();
         Assert.Equal("zh-Hans", loaded.Language);
-        Assert.Equal("dock", loaded.Mode);
+        Assert.Equal("float", loaded.Mode);
         Assert.Equal(1234, loaded.AutoCollapseMs);
     }
 }

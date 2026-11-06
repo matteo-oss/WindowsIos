@@ -300,7 +300,6 @@ public sealed record AppSettings
     public IslandMode IslandMode => Mode switch
     {
         "flush" => IslandMode.Flush,
-        "dock" => IslandMode.Dock,
         _ => IslandMode.Float,
     };
 
@@ -438,7 +437,7 @@ public sealed record AppSettings
         MotionStrength = Math.Clamp(MotionStrength, MotionProfile.MinStrength, MotionProfile.MaxStrength),
         TabBarStyle = Enum.IsDefined(TabBarStyle) ? TabBarStyle : TabBarStyle.BottomPreview,
         RailSide = Enum.IsDefined(RailSide) ? RailSide : PageRailSide.Left,
-        Mode = Mode is "float" or "flush" or "dock" ? Mode : "float",
+        Mode = Mode is "float" or "flush" ? Mode : "float",
         Anchor = Anchor is "top-left" or "top-center" or "top-right" or "bottom-left" or "bottom-center" or "bottom-right"
             ? Anchor
             : "top-center",

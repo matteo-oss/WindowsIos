@@ -117,7 +117,7 @@ public sealed class SkiaShellIntegration : IAsyncDisposable
 
     private async Task StartTrayAsync(CancellationToken cancellationToken)
     {
-        var tooltip = _localizer?.Format(LocKeys.Tray.Tooltip, ("status", "FluidBar")) ?? "FluidBar";
+        var tooltip = _localizer?.Format(LocKeys.Tray.Tooltip, ("status", "flutter")) ?? "flutter";
         await _tray.StartAsync(new TrayIconOptions
         {
             ToolTip = tooltip,
@@ -125,7 +125,7 @@ public sealed class SkiaShellIntegration : IAsyncDisposable
         }, cancellationToken).ConfigureAwait(false);
         var menu = new List<TrayMenuItem>
         {
-            new("toggle", L(LocKeys.Tray.Open, "Open FluidBar")),
+            new("toggle", L(LocKeys.Tray.Open, "Open flutter")),
             new("hide", L(LocKeys.Page.Home.HideIsland, "Hide island")),
             new("settings", L(LocKeys.Tray.Settings, "Settings…")),
             new("market", L(LocKeys.Tray.Market, "Plugin market…")),
@@ -141,7 +141,7 @@ public sealed class SkiaShellIntegration : IAsyncDisposable
         }
 
         menu.Add(TrayMenuItem.Separator);
-        menu.Add(new TrayMenuItem("exit", L(LocKeys.Tray.Exit, "Exit FluidBar")));
+        menu.Add(new TrayMenuItem("exit", L(LocKeys.Tray.Exit, "Exit flutter")));
         _tray.SetMenuItems(menu);
         await _tray.SetToolTipAsync(tooltip, cancellationToken).ConfigureAwait(false);
         _trayStarted = true;

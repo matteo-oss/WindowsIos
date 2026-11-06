@@ -22,6 +22,27 @@ namespace FluidBar.Ui.Tests;
 /// <summary>End-to-end headless host behavior: state wiring, effects, placement and window-bounds contract.</summary>
 public sealed class IslandHostTests
 {
+    [Theory]
+    [InlineData("zh-CN", "10月18日")]
+    [InlineData("en-US", "Oct 18")]
+    public async Task IdleCompactModel_FormatsDateForCurrentCulture(string culture, string expectedDate)
+    {
+        await AvaloniaTest.Run(() =>
+        {
+            var localizer = TestFixtures.CreateLocalizer(culture);
+            var content = new IslandContent
+            {
+                Now = new DateTimeOffset(2026, 10, 18, 9, 41, 0, TimeSpan.Zero),
+            };
+            var island = ActivityPresenter.PresentIsland(ActivitySchedulerState.Empty, IslandState.Hidden);
+
+            var model = IslandPresenter.ToCompact(island, content, localizer, isPeeked: false);
+
+            Assert.Equal(expectedDate, model.DateText);
+            return true;
+        });
+    }
+
     [Fact]
     public async Task Start_ShowsIdlePill_PlacesOnce_AndWiresStateMachine()
     {

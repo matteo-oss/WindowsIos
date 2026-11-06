@@ -1,3 +1,4 @@
+
 using System.Globalization;
 
 namespace FluidBar.Core.Telemetry;

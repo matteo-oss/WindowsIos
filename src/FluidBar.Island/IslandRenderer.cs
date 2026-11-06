@@ -1172,7 +1172,7 @@ public sealed class IslandRenderer : IDisposable
     }
 
     /// <summary>
-    /// Adaptive tint multiplier around the selected 30 % tint (0.85×–1.15×): the prototype look stays
+    /// Adaptive tint multiplier around the translucent glass tint: the material stays
     /// recognisable, but a very bright desktop still gets a slightly heavier tint for label contrast.
     /// </summary>
     private static double AdaptiveTint(double luminance)

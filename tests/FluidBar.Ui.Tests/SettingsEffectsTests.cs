@@ -406,7 +406,7 @@ public sealed class SettingsEffectsTests
         Assert.Equal("nord", parsed!.Palette);
         Assert.Equal(31, parsed.PanelRadius);
         Assert.Equal(3600, parsed.AutoCollapseMs);
-        Assert.Equal("dock", parsed.Mode);
+        Assert.Equal("float", parsed.Mode);
 
         Assert.True(SettingsExport.TryParse(settings.ToJson(), out var raw, out _));
         Assert.Equal(settings.Palette, raw!.Palette);
