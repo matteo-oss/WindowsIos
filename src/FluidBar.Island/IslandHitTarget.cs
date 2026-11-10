@@ -130,11 +130,15 @@ public enum IslandPageControl
     /// <summary>Open the task manager from the task card header.</summary>
     TaskManage,
 
+    /// <summary>Open the memo manager from the widgets card header.</summary>
+    MemoManage,
+
     /// <summary>Calendar previous-month button.</summary>
     CalendarPrevious,
 
     /// <summary>Calendar next-month button.</summary>
     CalendarNext,
+    CalendarDay,
 
     /// <summary>Scrollable list body (wheel/touch scroll region).</summary>
     Scroll,

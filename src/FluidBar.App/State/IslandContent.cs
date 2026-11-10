@@ -3,6 +3,7 @@ using FluidBar.App.Island;
 using FluidBar.App.Localization;
 using FluidBar.App.Theme;
 using FluidBar.Core.Presentation;
+using FluidBar.Platform.Windows.Tasks;
 
 namespace FluidBar.App.State;
 
@@ -184,6 +185,12 @@ public sealed record WidgetTaskData
 
     /// <summary>Whether the task is checked.</summary>
     public bool Done { get; init; }
+
+    public string? TimeText { get; init; }
+
+    public TaskPriority Priority { get; init; } = TaskPriority.Normal;
+
+    public string? Category { get; init; }
 }
 
 /// <summary>Visual tone of a widgets system stat bar (maps onto the renderer's own tone enum).</summary>

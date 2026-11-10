@@ -185,6 +185,8 @@ public sealed record AppSettings
 
     /// <summary>Global hotkey to open settings (Ctrl+Alt+S).</summary>
     public string HotkeySettings { get; init; } = "Ctrl+Alt+S";
+    public string BoundPhone { get; init; } = string.Empty;
+    public string BoundEmail { get; init; } = string.Empty;
 
     /// <summary>Island material tier.</summary>
     public IslandMaterial Material { get; init; } = IslandMaterial.Obsidian;
@@ -425,6 +427,8 @@ public sealed record AppSettings
         HotkeyToggle = NormalizeHotkey(HotkeyToggle, "Ctrl+Alt+D"),
         HotkeyHide = NormalizeHotkey(HotkeyHide, "Ctrl+Alt+H"),
         HotkeySettings = NormalizeHotkey(HotkeySettings, "Ctrl+Alt+S"),
+        BoundPhone = (BoundPhone ?? string.Empty).Trim(),
+        BoundEmail = (BoundEmail ?? string.Empty).Trim(),
         Material = Enum.IsDefined(Material) ? Material : IslandMaterial.Obsidian,
         Palette = Palette is "obsidian" or "graphite" or "slate" or "nord" ? Palette : "obsidian",
         AccentMode = AccentMode is "artwork" or "system" or "custom" ? AccentMode : "artwork",
@@ -486,6 +490,8 @@ public sealed record AppSettings
                 HotkeyToggle = HotkeyToggle,
                 HotkeyHide = HotkeyHide,
                 HotkeySettings = HotkeySettings,
+                BoundPhone = BoundPhone,
+                BoundEmail = BoundEmail,
             },
             Appearance = new AppearanceJson
             {
@@ -581,6 +587,8 @@ public sealed record AppSettings
                 HotkeyToggle = document.General?.HotkeyToggle ?? defaults.HotkeyToggle,
                 HotkeyHide = document.General?.HotkeyHide ?? defaults.HotkeyHide,
                 HotkeySettings = document.General?.HotkeySettings ?? defaults.HotkeySettings,
+                BoundPhone = document.General?.BoundPhone ?? defaults.BoundPhone,
+                BoundEmail = document.General?.BoundEmail ?? defaults.BoundEmail,
                 Theme = ParseTheme(document.Appearance?.Theme),
                 Material = ParseMaterial(document.Appearance?.Material),
                 Palette = document.Appearance?.Palette ?? defaults.Palette,
@@ -825,6 +833,8 @@ internal sealed class GeneralJson
     public string? HotkeyHide { get; set; }
 
     public string? HotkeySettings { get; set; }
+    public string? BoundPhone { get; set; }
+    public string? BoundEmail { get; set; }
 
     public bool? Telemetry { get; set; }
 }

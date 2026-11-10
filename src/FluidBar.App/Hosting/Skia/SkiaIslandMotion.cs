@@ -12,6 +12,7 @@ namespace FluidBar.App.Hosting.Skia;
 /// <param name="GhostCount">Live ghost layer count (stacking strategy already applied).</param>
 /// <param name="SplitCount">Live split-islet count (split strategy); 0 merges the islets.</param>
 /// <param name="HideTarget">Whether the shell fades out.</param>
+/// <param name="LockGeometry">Whether compact/expanded geometry must snap between its two fixed sizes.</param>
 public readonly record struct SkiaMotionTarget(
     ShellForm Form,
     IslandMode Mode,
@@ -19,7 +20,8 @@ public readonly record struct SkiaMotionTarget(
     VisualSize CompactSize,
     int GhostCount,
     int SplitCount,
-    bool HideTarget)
+    bool HideTarget,
+    bool LockGeometry = false)
 {
     /// <summary>Hidden target for a mode/anchor.</summary>
     /// <param name="mode">Presentation mode.</param>
@@ -110,10 +112,10 @@ public sealed class SkiaIslandMotion : IDisposable
     public bool ReducedMotion => _profile.ReducedMotion;
 
     /// <summary>Current shell width in DIP (includes the peek delta).</summary>
-    public double Width => Math.Max(0, _width.Value + (_hover.Value * LayoutTokens.PeekDeltaWidth));
+    public double Width => Math.Max(0, _width.Value);
 
     /// <summary>Current shell height in DIP (includes the peek delta).</summary>
-    public double Height => Math.Max(0, _height.Value + (_hover.Value * LayoutTokens.PeekDeltaHeight));
+    public double Height => Math.Max(0, _height.Value);
 
     /// <summary>Whole-shell opacity (hide spring).</summary>
     public double Opacity => Math.Clamp(_hide.Value, 0, 1);
@@ -210,12 +212,12 @@ public sealed class SkiaIslandMotion : IDisposable
             var compactRadii = LayoutTokens.RadiiFor(ShellForm.Compact, mode, CompactTargetHeight);
             var expandedRadii = LayoutTokens.RadiiFor(
                 ShellForm.Expanded, mode, LayoutTokens.ExpandedHeight, PanelRadius);
-            var t = Math.Clamp(_radiusBlend.Value, 0, 1);
+            var blend = Math.Clamp(_radiusBlend.Value, 0, 1);
             return new CornerRadii(
-                Lerp(compactRadii.TopLeft, expandedRadii.TopLeft, t),
-                Lerp(compactRadii.TopRight, expandedRadii.TopRight, t),
-                Lerp(compactRadii.BottomRight, expandedRadii.BottomRight, t),
-                Lerp(compactRadii.BottomLeft, expandedRadii.BottomLeft, t));
+                Lerp(compactRadii.TopLeft, expandedRadii.TopLeft, blend),
+                Lerp(compactRadii.TopRight, expandedRadii.TopRight, blend),
+                Lerp(compactRadii.BottomRight, expandedRadii.BottomRight, blend),
+                Lerp(compactRadii.BottomLeft, expandedRadii.BottomLeft, blend));
         }
     }
 
@@ -227,9 +229,9 @@ public sealed class SkiaIslandMotion : IDisposable
         _hasAppeared |= target.Form != ShellForm.Hidden;
         _target = target;
 
-        var maxCompactW = target.Mode == IslandMode.Dock ? LayoutTokens.ExpandedWidth : LayoutTokens.NotificationMaxWidth;
-        var compactW = Math.Clamp(target.CompactSize.Width, 60, maxCompactW);
-        var compactH = Math.Clamp(target.CompactSize.Height, 24, LayoutTokens.ExpandedHeight);
+        var fixedCompact = LayoutTokens.CompactSize(null, target.Mode);
+        var compactW = fixedCompact.Width;
+        var compactH = fixedCompact.Height;
         var wantsExpanded = target.Form == ShellForm.Expanded;
         var baseWidth = wantsExpanded ? LayoutTokens.ExpandedWidth : compactW;
         var baseHeight = wantsExpanded ? LayoutTokens.ExpandedHeight : compactH;
@@ -248,8 +250,18 @@ public sealed class SkiaIslandMotion : IDisposable
         }
         else
         {
-            _width.Retarget(baseWidth, ShellTransition.ShellDurationSeconds, ShellTransition.ShellEasing);
-            _height.Retarget(baseHeight, ShellTransition.ShellDurationSeconds, ShellTransition.ShellEasing);
+            if (target.LockGeometry)
+            {
+                // The island exposes exactly two physical endpoints. Activity changes remain
+                // paint-only while compact; an explicit click switches directly to expanded.
+                _width.SnapTo(baseWidth);
+                _height.SnapTo(baseHeight);
+            }
+            else
+            {
+                _width.Retarget(baseWidth, ShellTransition.ShellDurationSeconds, ShellTransition.ShellEasing);
+                _height.Retarget(baseHeight, ShellTransition.ShellDurationSeconds, ShellTransition.ShellEasing);
+            }
 
             if (wantsExpanded != _wasExpanded)
             {
@@ -289,12 +301,12 @@ public sealed class SkiaIslandMotion : IDisposable
     public void SnapToTarget()
     {
         var wantsExpanded = _target.Form == ShellForm.Expanded;
-        var maxCompactW = _target.Mode == IslandMode.Dock ? LayoutTokens.ExpandedWidth : LayoutTokens.NotificationMaxWidth;
-        var compactW = Math.Clamp(_target.CompactSize.Width, 60, maxCompactW);
-        var compactH = Math.Clamp(_target.CompactSize.Height, 24, LayoutTokens.ExpandedHeight);
+        var fixedCompact = LayoutTokens.CompactSize(null, _target.Mode);
+        var compactW = fixedCompact.Width;
+        var compactH = fixedCompact.Height;
         SnapGeometry(wantsExpanded ? LayoutTokens.ExpandedWidth : compactW,
             wantsExpanded ? LayoutTokens.ExpandedHeight : compactH, wantsExpanded);
-        _hover.SnapTo(_target.Form == ShellForm.Peek ? 1 : 0);
+        _hover.SnapTo(0);
         _press.SnapTo(0);
         _nudge.SnapTo(0);
         _hide.SnapTo(_target.HideTarget ? 0 : 1);
@@ -387,7 +399,7 @@ public sealed class SkiaIslandMotion : IDisposable
     private bool AllTransitionsAtRest => _width.IsAtRest && _height.IsAtRest && _radiusBlend.IsAtRest
         && _compactOpacity.IsAtRest && _expandedOpacity.IsAtRest && _chromeOpacity.IsAtRest;
 
-    private double CompactTargetHeight => Math.Clamp(_target.CompactSize.Height, 24, LayoutTokens.ExpandedHeight);
+    private double CompactTargetHeight => LayoutTokens.CompactSize(null, _target.Mode).Height;
 
     private void SnapGeometry(double width, double height, bool expanded)
     {

@@ -60,7 +60,7 @@ public sealed class IslandPreviewModelTests
         var acrylic = IslandPreviewModel.From(
             Baseline with { Material = IslandMaterial.Acrylic, FillOpacity = 0.9 }, DarkAppearance);
         Assert.True(acrylic.Glass);
-        Assert.Equal(IslandPreviewModel.GlassFillOpacity, acrylic.EffectiveFillOpacity, 3);
+        Assert.Equal(0.9, acrylic.EffectiveFillOpacity, 3);
         Assert.Equal("acrylic", acrylic.Material);
 
         // Safe mode forces the opaque Tier 0 material (same rule as SkiaIslandThemeMapper).
@@ -82,9 +82,7 @@ public sealed class IslandPreviewModelTests
         Assert.True(liquid.LiquidGlass);
         Assert.False(acrylic.LiquidGlass);
         Assert.Equal("liquid-glass", liquid.Material);
-        Assert.Equal(IslandPreviewModel.LiquidGlassFillOpacity, liquid.EffectiveFillOpacity, 3);
-        Assert.True(liquid.EffectiveFillOpacity < acrylic.EffectiveFillOpacity,
-            "liquid glass should be clearer than acrylic");
+        Assert.Equal(0.9, liquid.EffectiveFillOpacity, 3);
 
         var liquidSafe = IslandPreviewModel.From(
             Baseline with

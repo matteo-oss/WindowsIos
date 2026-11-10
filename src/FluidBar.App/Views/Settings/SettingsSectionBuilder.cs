@@ -18,6 +18,7 @@ using FluidBar.Core.Configuration;
 using FluidBar.Core.Layout;
 using QuickActionSetting = FluidBar.Core.Settings.QuickActionSetting;
 using FluidBar.Platform.Windows.Agent;
+using FluidBar.Platform.Windows.Notifications;
 using FluidBar.Platform.Windows.Update;
 
 namespace FluidBar.App.Views.Settings;
@@ -59,6 +60,9 @@ public sealed record SettingsWindowContext
 
     /// <summary>Frame-timing source for the advanced diagnostics line (null when no island host).</summary>
     public IFrameStatsSource? FrameStats { get; init; }
+
+    /// <summary>The single real Windows notification listener used by the capsule.</summary>
+    public INotificationSource? Notifications { get; init; }
 
     /// <summary>Launches the verified installer and exits (About "restart and install").</summary>
     public Action? RestartToInstall { get; init; }
@@ -282,7 +286,13 @@ public static class SettingsSectionBuilder
                     value => ctx.Settings.Update(s => s with { AutoUpdate = value ? "notify" : "off" })),
                 ToggleRow(ctx, ctx.Localizer.Get(LocKeys.Settings.General.TrayIcon),
                     ctx.Localizer.Get(LocKeys.Settings.General.TrayIconHint), settings.TrayIcon,
-                    value => ctx.Settings.Update(s => s with { TrayIcon = value }))));
+                    value => ctx.Settings.Update(s => s with { TrayIcon = value })),
+                TextFieldRow(ctx, ctx.Localizer.Get("Settings.General.Phone"), ctx.Localizer.Get("Settings.General.BindingHint"), settings.BoundPhone, ctx.Localizer.Get("Settings.General.PhonePlaceholder"),
+                    value => ctx.Settings.Update(s => s with { BoundPhone = value })),
+                TextFieldRow(ctx, ctx.Localizer.Get("Settings.General.Email"), null, settings.BoundEmail, ctx.Localizer.Get("Settings.General.EmailPlaceholder"),
+                    value => ctx.Settings.Update(s => s with { BoundEmail = value }))));
+
+        panel.Children.Add(BuildNotificationAccess(ctx));
 
         panel.Children.Add(SettingsWidgets.Caption(ctx.Localizer.Get(LocKeys.Settings.General.Hotkeys), palette));
         panel.Children.Add(SettingsWidgets.Group(palette, topBorder: false,
@@ -296,6 +306,60 @@ public static class SettingsSectionBuilder
         panel.Children.Add(SettingsControls.FooterNote(ctx.Localizer.Get(LocKeys.Settings.FooterNote), palette));
         return panel;
     }
+
+    private static Control BuildNotificationAccess(SettingsWindowContext ctx)
+    {
+        var palette = ctx.Palette;
+        var chinese = ctx.Localizer.CurrentCulture.TwoLetterISOLanguageName == "zh";
+        var source = ctx.Notifications;
+        var status = new TextBlock
+        {
+            Text = NotificationAccessText(source?.AccessState ?? NotificationAccessState.Unavailable, chinese),
+            Foreground = palette.SecondaryBrush,
+            FontSize = SettingsMetrics.FooterNoteSize,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        actions.Children.Add(SettingsControls.Button(
+            chinese ? "授权读取通知" : "Grant notification access",
+            palette, SettingsButtonVariant.Raised, SettingsButtonSize.Md, SettingsIconKind.Chat,
+            () => _ = RequestNotificationAccessAsync()));
+        actions.Children.Add(SettingsControls.Button(
+            chinese ? "打开 Windows 通知设置" : "Open Windows notification settings",
+            palette, SettingsButtonVariant.Raised, SettingsButtonSize.Md, SettingsIconKind.Settings,
+            () => ctx.OpenPath("ms-settings:notifications")));
+
+        async Task RequestNotificationAccessAsync()
+        {
+            if (source is null)
+            {
+                status.Text = NotificationAccessText(NotificationAccessState.Unavailable, chinese);
+                return;
+            }
+
+            var access = await source.RequestAccessAsync().ConfigureAwait(true);
+            status.Text = NotificationAccessText(access, chinese);
+            ctx.ShowStatus(status.Text);
+        }
+
+        return SettingsWidgets.Group(palette, topBorder: true,
+            SettingsWidgets.Row(
+                chinese ? "真实消息通知" : "Real message notifications",
+                chinese
+                    ? "读取 Windows 通知中心中的微信、钉钉、飞书和企业微信消息；这些客户端也必须开启系统通知。"
+                    : "Reads WeChat, DingTalk, Feishu and WeCom messages from Windows Notification Center. Notifications must also be enabled in each client.",
+                actions, palette),
+            status);
+    }
+
+    private static string NotificationAccessText(NotificationAccessState access, bool chinese) => access switch
+    {
+        NotificationAccessState.Allowed => chinese ? "状态：已授权，正在监听真实通知。" : "Status: allowed; listening for real notifications.",
+        NotificationAccessState.Denied => chinese ? "状态：权限被拒绝，请在 Windows 设置中允许通知访问。" : "Status: denied. Allow notification access in Windows Settings.",
+        NotificationAccessState.Unspecified => chinese ? "状态：尚未授权，请点击授权读取通知。" : "Status: permission not requested yet.",
+        _ => chinese ? "状态：当前 Windows 环境不支持通知读取。" : "Status: notification access is unavailable on this Windows installation.",
+    };
 
     /// <summary>Single-line text row; commits on Enter or when the field loses focus (never per keystroke).</summary>
     private static Control TextFieldRow(SettingsWindowContext ctx, string label, string? description, string value,
@@ -391,8 +455,6 @@ public static class SettingsSectionBuilder
     {
         var settings = ctx.Settings.Current;
         var palette = ctx.Palette;
-        // Same rule the mapper applies: every translucent tier degrades to obsidian in safe mode.
-        var translucent = settings.Material != IslandMaterial.Obsidian && !settings.Advanced.SafeMode;
         var preview = new IslandPreview();
 
         var swatchList = new List<(AccentSwatch Swatch, string Hex)>();
@@ -584,14 +646,9 @@ public static class SettingsSectionBuilder
                     ctx.Localizer.Get(LocKeys.Settings.Appearance.PanelRadiusHint), 16, 36, 1, settings.PanelRadius,
                     value => $"{value:0} px", value => ctx.Settings.Update(s => s with { PanelRadius = value })),
                 SliderRow(ctx, ctx.Localizer.Get(LocKeys.Settings.Appearance.FillOpacity),
-                    // Acrylic pins the fill to 72% in the renderer, so the slider is disabled with an
-                    // explanation instead of silently doing nothing.
-                    translucent
-                        ? ctx.Localizer.Get(LocKeys.Settings.Appearance.FillOpacityGlassHint)
-                        : ctx.Localizer.Get(LocKeys.Settings.Appearance.FillOpacityHint),
+                    ctx.Localizer.Get(LocKeys.Settings.Appearance.FillOpacityHint),
                     LayoutTokens.MinFillOpacity, 1.0, 0.01, settings.FillOpacity,
-                    value => $"{value * 100:0}%", value => ctx.Settings.Update(s => s with { FillOpacity = value }),
-                    enabled: !translucent),
+                    value => $"{value * 100:0}%", value => ctx.Settings.Update(s => s with { FillOpacity = value })),
                 // Text size moved here: it is an island token, so the preview clock scales live.
                 SliderRow(ctx, ctx.Localizer.Get(LocKeys.Settings.Appearance.FontScale), null,
                     0.8, 1.6, 0.05, settings.FontScale,

@@ -7,19 +7,20 @@ using FluidBar.Island;
 namespace FluidBar.Ui.Tests;
 
 /// <summary>
-/// Compact media pill after the changes: no play/pause control anywhere on the pill, and the lyric form
-/// widens the shell smoothly instead of ellipsising the line.
+/// Compact media has exactly two physical sizes. Playback, lyrics and hover remain paint-only while
+/// compact; clicking switches directly to the expanded endpoint.
 /// </summary>
 public sealed class CompactMediaWidthTests
 {
-    private const float TokenWidth = 226f;
+    private const float TokenWidth = 132f;
+    private const float TokenHeight = 36f;
 
     private static IslandRenderState MediaPill(double width) => new()
     {
         Mode = IslandMode.Float,
         Form = ShellForm.Compact,
         ShellWidth = width,
-        ShellHeight = 40,
+        ShellHeight = TokenHeight,
         Compact = new CompactActivity(ActivityKind.Media, new CompactModel
         {
             Title = "Miss You a Little",
@@ -49,74 +50,63 @@ public sealed class CompactMediaWidthTests
     }
 
     [Fact]
-    public void Compact_media_hit_area_follows_the_widened_shell()
+    public void Compact_media_token_matches_idle_capsule()
     {
-        var wide = MediaPill(360);
-        var shell = IslandMetrics.ShellRect(wide);
-
-        // The widened pill is a valid expand target all the way to its new right edge…
-        Assert.Equal(IslandHitKind.Compact, SkiaIslandHitTest.Hit(wide, shell.Right - 6, shell.MidY).Kind);
-        // …and nothing exists beyond it.
-        Assert.NotEqual(IslandHitKind.Compact, SkiaIslandHitTest.Hit(wide, shell.Right + 4, shell.MidY).Kind);
+        Assert.Equal(new VisualSize(TokenWidth, TokenHeight), LayoutTokens.CompactSize(ActivityKind.Media));
+        Assert.Equal(LayoutTokens.CompactSize(ActivityKind.Idle), LayoutTokens.CompactSize(ActivityKind.Media));
     }
 
+    [Theory]
+    [InlineData(ActivityKind.Idle)]
+    [InlineData(ActivityKind.Media)]
+    [InlineData(ActivityKind.Notification)]
+    [InlineData(ActivityKind.Clipboard)]
+    [InlineData(ActivityKind.FileShelf)]
+    [InlineData(ActivityKind.Agent)]
+    [InlineData(ActivityKind.Timer)]
+    public void All_activity_kinds_share_the_same_compact_geometry(ActivityKind kind)
+        => Assert.Equal(LayoutTokens.CompactSize(ActivityKind.Idle), LayoutTokens.CompactSize(kind));
+
     [Fact]
-    public void Adaptive_pill_width_grows_then_shrinks_monotonically()
+    public void Playback_lyrics_and_hover_cannot_resize_compact_media()
     {
         using var motion = new SkiaIslandMotion();
 
-        motion.SetTarget(Target(TokenWidth));
+        motion.SetTarget(Target(ShellForm.Compact, TokenWidth));
         Assert.Equal(TokenWidth, motion.Width, 0.5);
+        Assert.Equal(TokenHeight, motion.Height, 0.5);
 
-        // A long lyric line must widen the pill over several frames, never in one jump.
-        var wide = 320.0;
-        motion.SetTarget(Target(wide));
-        var growth = Sample(motion);
-        Assert.True(growth.Count > 2, "the width change must be animated over multiple frames");
-        Assert.True(growth[0] < wide - 1, "the width must not jump to the new target in one frame");
-        AssertMonotonic(growth, increasing: true);
-        Assert.Equal(wide, growth[^1], 1.5);
-
-        // The next (shorter) line shrinks it back the same way.
-        motion.SetTarget(Target(240));
-        var shrink = Sample(motion);
-        Assert.True(shrink.Count > 2);
-        AssertMonotonic(shrink, increasing: false);
-        Assert.Equal(240, shrink[^1], 1.5);
-    }
-
-    private static void AssertMonotonic(List<double> samples, bool increasing)
-    {
-        for (var index = 1; index < samples.Count; index++)
-        {
-            var delta = samples[index] - samples[index - 1];
-            Assert.True(
-                increasing ? delta >= -0.51 : delta <= 0.51,
-                $"width must change monotonically ({samples[index - 1]:0.##} → {samples[index]:0.##} at frame {index})");
-        }
-    }
-
-    private static List<double> Sample(SkiaIslandMotion motion)
-    {
-        var samples = new List<double>();
-        var frames = 0;
-        while (!motion.IsAtRest && frames < 240)
+        motion.SetTarget(Target(ShellForm.Peek, TokenWidth));
+        for (var frame = 0; frame < 60; frame++)
         {
             motion.Step(1.0 / 60.0);
-            samples.Add(motion.Width);
-            frames++;
+            Assert.Equal(TokenWidth, motion.Width, 0.01);
+            Assert.Equal(TokenHeight, motion.Height, 0.01);
         }
-
-        Assert.True(frames < 240, "the width transition must settle");
-        return samples;
     }
 
-    private static SkiaMotionTarget Target(double compactWidth) => new(
-        ShellForm.Compact,
+    [Fact]
+    public void Expanded_media_switches_only_between_endpoint_sizes()
+    {
+        using var motion = new SkiaIslandMotion();
+        motion.SetTarget(Target(ShellForm.Compact, TokenWidth));
+
+        motion.SetTarget(Target(ShellForm.Expanded, TokenWidth));
+        Assert.Equal(LayoutTokens.ExpandedWidth, motion.Width, 0.01);
+        Assert.Equal(LayoutTokens.ExpandedHeight, motion.Height, 0.01);
+
+        motion.SetTarget(Target(ShellForm.Compact, TokenWidth));
+        Assert.Equal(TokenWidth, motion.Width, 0.01);
+        Assert.Equal(TokenHeight, motion.Height, 0.01);
+    }
+
+    private static SkiaMotionTarget Target(ShellForm form, double compactWidth) => new(
+        form,
         IslandMode.Float,
         IslandAnchor.TopCenter,
-        new VisualSize(compactWidth, 40),
+        new VisualSize(compactWidth, TokenHeight),
         0,
         0,
-        false);
+        false,
+        LockGeometry: true);
 }

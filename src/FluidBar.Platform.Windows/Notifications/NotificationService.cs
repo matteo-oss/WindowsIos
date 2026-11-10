@@ -39,6 +39,9 @@ public sealed class NotificationServiceOptions
     /// </summary>
     public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>Poll interval for the read-only notification-database compatibility path.</summary>
+    public TimeSpan DatabasePollInterval { get; init; } = TimeSpan.FromSeconds(2);
+
     /// <summary>Whether to fall back to polling when the change event is unavailable.</summary>
     public bool EnablePollingFallback { get; init; } = true;
 }
@@ -50,11 +53,13 @@ public sealed class NotificationServiceOptions
 /// </summary>
 public sealed class NotificationService : PlatformMonitor<NotificationsSnapshot>, INotificationSource
 {
+    private static int s_syntheticId = int.MaxValue;
     private readonly NotificationServiceOptions _options;
     private readonly IPlatformLogger _logger;
     private readonly PlatformCounters _counters;
     private readonly NotificationHistory _history;
     private readonly NotificationCandidateReader _candidateReader;
+    private readonly NotificationDatabaseReader _databaseReader;
     private readonly object _stateGate = new();
     private UserNotificationListener? _listener;
     private ImmutableArray<NotificationEntry> _recent = ImmutableArray<NotificationEntry>.Empty;
@@ -63,6 +68,7 @@ public sealed class NotificationService : PlatformMonitor<NotificationsSnapshot>
     private static int s_activeInstances;
     private ITimer? _pollTimer;
     private bool _pollingFallback;
+    private bool _databaseFallback;
     private IReadOnlySet<uint> _seededIds = ImmutableHashSet<uint>.Empty;
     private int _primed;
     private int _instanceCounted;
@@ -78,6 +84,7 @@ public sealed class NotificationService : PlatformMonitor<NotificationsSnapshot>
         _options = options ?? new NotificationServiceOptions();
         _history = new NotificationHistory(_options.MaxSeenIds, _options.MaxBatch);
         _candidateReader = new NotificationCandidateReader(_logger, TimeProvider, _options.MaxSeenIds);
+        _databaseReader = new NotificationDatabaseReader(_options.MaxTextCharacters);
     }
 
     /// <summary>
@@ -122,6 +129,7 @@ public sealed class NotificationService : PlatformMonitor<NotificationsSnapshot>
 
         StopPolling();
         _pollingFallback = false;
+        _databaseFallback = false;
         Volatile.Write(ref _primed, 0);
         Volatile.Write(ref _seededIds, ImmutableHashSet<uint>.Empty);
         Volatile.Write(ref _readIds, ImmutableHashSet<uint>.Empty);
@@ -133,10 +141,9 @@ public sealed class NotificationService : PlatformMonitor<NotificationsSnapshot>
         }
         catch (Exception ex)
         {
-            _access = NotificationAccessState.Unavailable;
-            Publish(new NotificationsSnapshot(_access, _recent));
             _logger.LogWarning(PlatformLogCategory.Notifications, "notifications.unavailable",
                 "UserNotificationListener is not available on this system.", ex);
+            StartDatabaseFallback();
             return;
         }
 
@@ -153,6 +160,7 @@ public sealed class NotificationService : PlatformMonitor<NotificationsSnapshot>
         {
             _logger.LogInfo(PlatformLogCategory.Notifications, "notifications.permission-required",
                 $"Notification access is '{access}'; the listener is idle until the user grants permission.");
+            StartDatabaseFallback();
         }
 
         _logger.LogInfo(PlatformLogCategory.Notifications, "notifications.listener-started",
@@ -168,6 +176,30 @@ public sealed class NotificationService : PlatformMonitor<NotificationsSnapshot>
 
     /// <summary>Creates an arrivals-only view over this listener (the plugin path keeps the same instance).</summary>
     public INotificationSource CreateNewArrivalsView() => new NewArrivalsNotificationSource(this, _logger);
+
+    /// <summary>Adds an in-process notification used by the notification simulator.</summary>
+    public void InjectSynthetic(string appName, string title, string body, DateTimeOffset? createdAt = null)
+    {
+        var id = unchecked((uint)Interlocked.Decrement(ref s_syntheticId));
+        var entry = new NotificationEntry(
+            id,
+            string.IsNullOrWhiteSpace(appName) ? "Notification" : appName.Trim(),
+            string.IsNullOrWhiteSpace(title) ? appName : title.Trim(),
+            body?.Trim() ?? string.Empty,
+            createdAt ?? TimeProvider.GetLocalNow(),
+            VerificationCodeDetector.Detect($"{title}\n{body}"));
+
+        NotificationsSnapshot snapshot;
+        lock (_stateGate)
+        {
+            _recent = NotificationListReducer.Bounded([entry, .. _recent], _options.MaxRecentNotifications);
+            snapshot = new NotificationsSnapshot(_access, _recent);
+        }
+
+        // A simulator notification is a new arrival even when Windows notification permission is denied.
+        Volatile.Write(ref _primed, 1);
+        Publish(snapshot);
+    }
 
     private void CountInstance()
     {
@@ -191,7 +223,7 @@ public sealed class NotificationService : PlatformMonitor<NotificationsSnapshot>
         var listener = _listener;
         if (listener is null)
         {
-            return NotificationAccessState.Unavailable;
+            return _databaseFallback ? NotificationAccessState.Allowed : NotificationAccessState.Unavailable;
         }
 
         try
@@ -201,7 +233,13 @@ public sealed class NotificationService : PlatformMonitor<NotificationsSnapshot>
             SetAccess(access, publish: true);
             if (access == NotificationAccessState.Allowed)
             {
+                _databaseFallback = false;
+                StopPolling();
                 await AttachAndPrimeAsync(listener, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                StartDatabaseFallback();
             }
 
             return access;
@@ -307,6 +345,34 @@ public sealed class NotificationService : PlatformMonitor<NotificationsSnapshot>
             });
     }
 
+    private void StartDatabaseFallback()
+    {
+        if (!_databaseReader.TryPrime())
+        {
+            SetAccess(NotificationAccessState.Unavailable, publish: true);
+            _logger.LogWarning(PlatformLogCategory.Notifications, "notifications.database-unavailable",
+                "The Windows notification database could not be opened read-only.");
+            return;
+        }
+
+        _databaseFallback = true;
+        Volatile.Write(ref _primed, 1);
+        SetAccess(NotificationAccessState.Allowed, publish: true);
+        var interval = _options.DatabasePollInterval > TimeSpan.Zero
+            ? _options.DatabasePollInterval
+            : TimeSpan.FromSeconds(2);
+        _pollTimer ??= TimeProvider.CreateTimer(
+            static state => ((NotificationService)state!).OnPollTick(),
+            this,
+            interval,
+            interval);
+        _logger.LogInfo(PlatformLogCategory.Notifications, "notifications.database-listener-started",
+            "Read-only Windows notification database listener started.", new Dictionary<string, object?>
+            {
+                ["intervalMs"] = (int)interval.TotalMilliseconds,
+            });
+    }
+
     private void StopPolling()
     {
         _pollTimer?.Dispose();
@@ -326,7 +392,56 @@ public sealed class NotificationService : PlatformMonitor<NotificationsSnapshot>
             {
                 ["intervalMs"] = (int)_options.PollInterval.TotalMilliseconds,
             });
-        _ = ProcessChangesSafeAsync();
+        if (_databaseFallback)
+        {
+            ProcessDatabaseChanges();
+        }
+        else
+        {
+            _ = ProcessChangesSafeAsync();
+        }
+    }
+
+    private void ProcessDatabaseChanges()
+    {
+        if (Interlocked.Exchange(ref _processing, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var candidates = _databaseReader.ReadNew();
+            var added = _history.Process(candidates);
+            if (added.Count == 0)
+            {
+                return;
+            }
+
+            lock (_stateGate)
+            {
+                _recent = NotificationListReducer.Merge(_recent, added, _options.MaxRecentNotifications);
+                PruneReadIds();
+            }
+
+            Publish(new NotificationsSnapshot(NotificationAccessState.Allowed, _recent));
+            _logger.LogInfo(PlatformLogCategory.Notifications, "notifications.database-received",
+                "Notification database produced new toast notifications.", new Dictionary<string, object?>
+                {
+                    ["added"] = added.Count,
+                    ["latestApp"] = added[^1].AppName,
+                });
+        }
+        catch (Exception ex)
+        {
+            _counters.IncrementMonitorCallbackFailures();
+            _logger.LogWarning(PlatformLogCategory.Notifications, "notifications.database-read-failed",
+                "Reading the Windows notification database failed; the next poll will retry.", ex);
+        }
+        finally
+        {
+            Volatile.Write(ref _processing, 0);
+        }
     }
 
     /// <summary>Fills the recent list from the toasts already present when the page opens.</summary>
@@ -716,6 +831,7 @@ public sealed class NotificationService : PlatformMonitor<NotificationsSnapshot>
         _candidateReader.Reset();
         StopPolling();
         _pollingFallback = false;
+        _databaseFallback = false;
         var listener = _listener;
         _listener = null;
         if (listener is not null && Interlocked.Exchange(ref _subscribed, 0) != 0)

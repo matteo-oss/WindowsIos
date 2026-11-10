@@ -149,6 +149,14 @@ public sealed class FluidBarApplication : Application
 
             var bootstrap = new AppBootstrap(desktop);
 
+            if (desktop.Args is { } launchArgs && launchArgs.Any(a => a.Equals("--simulate", StringComparison.OrdinalIgnoreCase) || a.Equals("--simulator", StringComparison.OrdinalIgnoreCase)))
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    new Views.Notifications.NotificationSimulatorWindow().Show();
+                });
+            }
+
             // Start composition without blocking the framework callback, but never drop the task: a
             // failure used to reach only the unobserved-task handler (or nothing at all), leaving a
             // process with no island behind an empty desktop.

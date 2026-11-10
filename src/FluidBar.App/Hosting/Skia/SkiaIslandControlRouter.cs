@@ -104,8 +104,12 @@ public static class SkiaIslandControlRouter
                     : null;
             case IslandPageControl.TaskManage:
                 return new IslandPlatformAction(IslandPlatformActionKind.TaskManage);
+            case IslandPageControl.MemoManage:
+                return new IslandPlatformAction(IslandPlatformActionKind.MemoManage);
             case IslandPageControl.CalendarPrevious:
                 return new IslandPlatformAction(IslandPlatformActionKind.CalendarNavigate, Value: -1);
+            case IslandPageControl.CalendarDay:
+                return null;
             case IslandPageControl.CalendarNext:
                 return new IslandPlatformAction(IslandPlatformActionKind.CalendarNavigate, Value: 1);
             default:

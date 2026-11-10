@@ -17,6 +17,7 @@ using FluidBar.Platform.Windows.CoreIntegration;
 using FluidBar.Platform.Windows.Devices;
 using FluidBar.Platform.Windows.Diagnostics;
 using FluidBar.Platform.Windows.Focus;
+using FluidBar.Platform.Windows.Interop;
 using FluidBar.Platform.Windows.Media;
 using FluidBar.Platform.Windows.Media.Lyrics;
 using FluidBar.Platform.Windows.Monitors;
@@ -90,6 +91,8 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
     private bool _weatherCityLockedByEnvironment;
     private INotificationSource? _pluginNotificationSource;
     private DateOnly _calendarMonth;
+    private DateOnly _selectedCalendarDate;
+    public DateOnly SelectedCalendarDate => _selectedCalendarDate;
     private ITimer? _clockTimer;
     private ITimer? _mediaTick;
     private TimeSpan _mediaTickInterval;
@@ -243,6 +246,7 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
 
         var today = time.GetLocalNow();
         _calendarMonth = new DateOnly(today.Year, today.Month, 1);
+        _selectedCalendarDate = DateOnly.FromDateTime(today.DateTime);
 
         _media.SnapshotChanged += OnSnapshotChanged;
         _clipboard.SnapshotChanged += OnSnapshotChanged;
@@ -361,6 +365,7 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
 
     /// <summary>Raised when the user opens the task management window.</summary>
     public event EventHandler? TaskManagementRequested;
+    public event EventHandler? MemoManagementRequested;
 
     /// <inheritdoc />
     public IslandContent Snapshot()
@@ -381,7 +386,7 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
         // Widgets page: real weather (fresh or last-known cached) and the local task file. Both mappers
         // return explicit empty values when nothing real exists, so the cards never show invented data.
         var weather = WidgetContentMapper.MapWeather(_weather.Current, now, _localizer);
-        var tasks = WidgetContentMapper.MapTasks(_tasks.Current, _localizer, _tasks.FilePath);
+        var tasks = WidgetContentMapper.MapTasks(_tasks.Current, _localizer, _tasks.FilePath, _selectedCalendarDate);
         var snapshot = new IslandContent
         {
             Now = now,
@@ -422,7 +427,7 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
             // the previous empty card was a missing mapping rather than missing data.
             CalendarMonthTitle = FormatMonthTitle(_calendarMonth, culture),
             WeekdayHeaders = BuildWeekdayHeaders(culture),
-            CalendarDays = BuildCalendarDays(_calendarMonth, today, _calendarEvents.Counts),
+            CalendarDays = BuildCalendarDays(_calendarMonth, today, _calendarEvents.Counts, _selectedCalendarDate),
             Stats = _systemStats.Build(batteryPercent, Localized(LocKeys.Battery.Title, "Battery")),
             UnreadCount = Math.Clamp(
                 _notifications.Current?.Recent.Count(entry => !_notifications.ReadIds.Contains(entry.Id)) ?? 0,
@@ -1325,6 +1330,17 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
         return IslandActionResult.Handled;
     }
 
+    private IslandActionResult SelectCalendarDay(int index)
+    {
+        if (index is < 0 or >= 42) return Unsupported("calendar day index is out of range");
+        var first = _calendarMonth.ToDateTime(TimeOnly.MinValue);
+        var offset = ((int)first.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
+        _selectedCalendarDate = DateOnly.FromDateTime(first.AddDays(index - offset));
+        _calendarMonth = new DateOnly(_selectedCalendarDate.Year, _selectedCalendarDate.Month, 1);
+        Changed?.Invoke(this, EventArgs.Empty);
+        return IslandActionResult.Handled;
+    }
+
     /// <summary>Culture-aware month header ("2026年10月" for zh, "October 2026" otherwise).</summary>
     private static string FormatMonthTitle(DateOnly month, CultureInfo culture)
     {
@@ -1348,8 +1364,8 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
     }
 
     /// <summary>42 Monday-first calendar cells for a month (current day highlighted, no event source yet).</summary>
-    private static ImmutableArray<CalendarDayData> BuildCalendarDays(
-        DateOnly month, DateOnly today, IReadOnlyDictionary<DateOnly, int>? eventCounts = null)
+    private ImmutableArray<CalendarDayData> BuildCalendarDays(
+        DateOnly month, DateOnly today, IReadOnlyDictionary<DateOnly, int>? eventCounts = null, DateOnly? selected = null)
     {
         var first = month.ToDateTime(TimeOnly.MinValue);
         var offset = ((int)first.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
@@ -1364,7 +1380,9 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
                 Day = day.Day,
                 InMonth = day.Month == month.Month && day.Year == month.Year,
                 IsToday = day.Date == todayDate,
-                HasEvents = eventCounts?.ContainsKey(DateOnly.FromDateTime(day)) == true,
+                HasEvents = eventCounts?.ContainsKey(DateOnly.FromDateTime(day)) == true
+                    || _tasks.Current?.Items.Any(item => item.Date == DateOnly.FromDateTime(day)) == true,
+                IsSelected = selected == DateOnly.FromDateTime(day),
             });
         }
 
@@ -1504,7 +1522,9 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
             IslandPlatformActionKind.AgentActivate => ActivateAgent(action.Index),
             IslandPlatformActionKind.TaskToggle => ToggleTask(action.Index),
             IslandPlatformActionKind.TaskManage => RequestTaskManagement(),
+            IslandPlatformActionKind.MemoManage => RequestMemoManagement(),
             IslandPlatformActionKind.CalendarNavigate => NavigateCalendar(action.Value < 0 ? -1 : 1),
+            IslandPlatformActionKind.CalendarSelectDay => SelectCalendarDay(action.Index),
             _ => Unsupported($"unknown island action {action.Kind}"),
         };
     }
@@ -1980,6 +2000,7 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
 
         var entry = recent[index];
         _notifications.MarkRead(entry.Id);
+
         var launch = NotificationToastImageReader.TryReadLaunch(entry.Id);
         if (!string.IsNullOrWhiteSpace(launch))
         {
@@ -1993,6 +2014,14 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
                 _logger.Warning(LogCategories.Platform, "island.actions.notification-launch-failed",
                     $"Launching notification URI '{launch}' failed; falling back to the app executable.", ex);
             }
+        }
+
+        // If the toast does not expose a usable deep link, activate the matching desktop client.
+        if (TryActivateSocialApp(entry, out var activationResult))
+        {
+            _logger.Information(LogCategories.Platform, "island.actions.notification-social-activated",
+                $"Activated chat app {activationResult.Platform}: {activationResult.Message}");
+            return IslandActionResult.Handled;
         }
 
         try
@@ -2019,6 +2048,41 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
         }
 
         return Unsupported("the notification has no launch URI and no running app executable");
+    }
+
+    private static bool TryActivateSocialApp(NotificationEntry entry, out ChatActivationResult result)
+    {
+        var text = $"{entry.AppName} {entry.Title}";
+        SocialPlatform? platform = null;
+        if (text.Contains("企业微信", StringComparison.OrdinalIgnoreCase) || text.Contains("WXWork", StringComparison.OrdinalIgnoreCase) || text.Contains("WeCom", StringComparison.OrdinalIgnoreCase))
+        {
+            platform = SocialPlatform.WeCom;
+        }
+        else if (text.Contains("微信", StringComparison.OrdinalIgnoreCase) || text.Contains("WeChat", StringComparison.OrdinalIgnoreCase) || text.Contains("Weixin", StringComparison.OrdinalIgnoreCase))
+        {
+            platform = SocialPlatform.WeChat;
+        }
+        else if (text.Contains("钉钉", StringComparison.OrdinalIgnoreCase) || text.Contains("DingTalk", StringComparison.OrdinalIgnoreCase))
+        {
+            platform = SocialPlatform.DingTalk;
+        }
+        else if (text.Contains("飞书", StringComparison.OrdinalIgnoreCase) || text.Contains("Feishu", StringComparison.OrdinalIgnoreCase) || text.Contains("Lark", StringComparison.OrdinalIgnoreCase))
+        {
+            platform = SocialPlatform.Feishu;
+        }
+        else if (text.Contains("企业微信", StringComparison.OrdinalIgnoreCase) || text.Contains("WXWork", StringComparison.OrdinalIgnoreCase) || text.Contains("WeCom", StringComparison.OrdinalIgnoreCase))
+        {
+            platform = SocialPlatform.WeCom;
+        }
+
+        if (platform is { } targetPlatform)
+        {
+            result = ChatAppActivator.Activate(targetPlatform);
+            return result.Status != ChatActivationStatus.NotFound && result.Status != ChatActivationStatus.Error;
+        }
+
+        result = null!;
+        return false;
     }
 
     /// <summary>
@@ -2052,13 +2116,25 @@ public sealed partial class SkiaPlatformActions : IIslandPlatformActions, IIslan
             return Unsupported("tasks.json has no toggleable row at that index (missing or invalid file)");
         }
 
-        _ = RunAsync(() => _tasks.ToggleAsync(index, snapshot), "island.actions.task-toggle");
+        var indices = snapshot.Items.Select((item, originalIndex) => (item, originalIndex))
+            .Where(row => row.item.Date is null || row.item.Date == _selectedCalendarDate)
+            .OrderBy(row => row.item.Date is null ? 0 : 1)
+            .ThenBy(row => row.item.StartTime ?? TimeOnly.MaxValue).ToArray();
+        if (index >= indices.Length) return Unsupported("the selected day has no task at that index");
+        var originalIndex = indices[index].originalIndex;
+        _ = RunAsync(() => _tasks.ToggleAsync(originalIndex, snapshot), "island.actions.task-toggle");
         return IslandActionResult.Handled;
     }
 
     private IslandActionResult RequestTaskManagement()
     {
         TaskManagementRequested?.Invoke(this, EventArgs.Empty);
+        return IslandActionResult.Handled;
+    }
+
+    private IslandActionResult RequestMemoManagement()
+    {
+        MemoManagementRequested?.Invoke(this, EventArgs.Empty);
         return IslandActionResult.Handled;
     }
 

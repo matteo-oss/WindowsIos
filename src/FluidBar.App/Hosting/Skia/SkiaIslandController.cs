@@ -88,6 +88,7 @@ public sealed partial class SkiaIslandController : IDisposable
 
     private CompactActivity _compact = new(ActivityKind.Idle, new CompactModel());
     private CompactActivity? _secondaryCompact;
+    private long _notificationAnimationUntilMs;
 
     // Compact lyric mode: the setting is read live from the media plugin's store, and a line change
     // animates in over CompactLyricFadeMs so the pill does not hard-cut twice per line.
@@ -2565,7 +2566,14 @@ public sealed partial class SkiaIslandController : IDisposable
         // A new song shows its title/artist for three seconds before the lyric takes the pill over:
         // jumping straight to the words made the track feel unannounced (user request 2026-10-21).
         var showCompactLyrics = _mediaPill.ShowCompactLyrics;
+        var previousCompact = _compact;
         _compact = SkiaIslandStateBuilder.BuildCompact(presentation, content, _localizer, peeked, showCompactLyrics);
+        if (_compact != previousCompact
+            && _compact.Kind is ActivityKind.Notification or ActivityKind.Clipboard or ActivityKind.FileShelf)
+        {
+            _notificationAnimationUntilMs = NowMs() + 1800;
+            _motionPhase = 0;
+        }
         _secondaryCompact = null;
         TrackCompactLyric();
         _pluginPages = _pageRegistry?.BuildPluginPages() ?? [];
@@ -2704,9 +2712,6 @@ public sealed partial class SkiaIslandController : IDisposable
         return ContentDamage();
     }
 
-    private double _lastLyricWidth = -1;
-    private long _lastLyricWidthLogMs;
-
     private SkiaMotionTarget BuildTarget(IslandViewModel viewModel)
     {
         var settings = _settings.Current;
@@ -2717,48 +2722,10 @@ public sealed partial class SkiaIslandController : IDisposable
         var compactKind = viewModel.Primary?.Kind;
         var compactSize = LayoutTokens.CompactSizeFor(compactKind, mode, settings.FontScale);
 
-        // The notification card only grows when its text actually needs the room; short messages keep
-        // the 360 DIP token. The cap is 810 DIP after the requested -1/3.
-        if (compactKind == ActivityKind.Notification && _compact.Model is { } notificationModel)
-        {
-            var measured = MeasureNotificationWidth(notificationModel, settings.FontScale);
-            var width = Math.Clamp(
-                measured * LayoutTokens.CompactScaleFor(mode),
-                LayoutTokens.NotificationMinWidth,
-                LayoutTokens.NotificationMaxWidth);
-            compactSize = new VisualSize(width, compactSize.Height);
-        }
+        // Activity content is clipped/ellipsized within the fixed compact shell. Message length
+        // must never change the shell geometry.
+        compactSize = LayoutTokens.CompactSize(null, mode);
 
-        // Lyric form: widen the pill so the whole line fits instead of ellipsising it. The motion driver
-        // tweens the width (380 ms shell transition), so a line change grows/shrinks the pill smoothly;
-        // the clamp keeps the token as the floor and LayoutTokens.MediaMaxWidth (expanded + 1/2 = 660) as the
-        // ceiling, so long lyric lines are no longer cut at 440.
-        if (mode != IslandMode.Dock
-            && compactKind == ActivityKind.Media
-            && _compact.Model is { ShowLyrics: true } lyric
-            && !string.IsNullOrEmpty(lyric.LyricLine))
-        {
-            var measured = MeasureCompactLyric(lyric.LyricLine, settings.FontScale);
-            var visualScale = (float)LayoutTokens.CompactScaleFor(mode);
-            var logicalWidth = CompactMediaLayout.AdaptiveWidth(
-                measured,
-                CompactMediaLayout.MinContentWidth,
-                (float)(LayoutTokens.MediaMaxWidth / visualScale));
-            var width = logicalWidth * visualScale;
-            compactSize = new VisualSize(width, compactSize.Height);
-
-            // Provenance for the pill width: proves from the running app which ceiling a lyric line was given
-            // (rate limited; the diag file is only touched when a value actually changes).
-            if (Math.Abs(width - _lastLyricWidth) > 0.5
-                && Environment.TickCount64 - _lastLyricWidthLogMs > 1000)
-            {
-                _lastLyricWidth = width;
-                _lastLyricWidthLogMs = Environment.TickCount64;
-                FluidBar.Platform.Windows.Media.MediaDiagnostics.LogAlways(
-                    $"compact.width measured={measured:0.0} pill={width:0.0} ceiling={LayoutTokens.MediaMaxWidth:0.0} " +
-                    $"lyric='{(lyric.LyricLine.Length > 40 ? lyric.LyricLine[..40] : lyric.LyricLine)}'");
-            }
-        }
         var ghostCount = 0;
         foreach (var ghost in viewModel.Ghosts)
         {
@@ -2792,7 +2759,7 @@ public sealed partial class SkiaIslandController : IDisposable
         // With more activities than the visible stack can hold, the compact pill reserves a column for
         // the "+N" chip. Keeping the reservation here (not only in the renderer) means the shell, its
         // hit region and the chip always agree on the same width.
-        if (viewModel.OverflowCount > 0)
+        if (viewModel.OverflowCount > 0 && compactKind != ActivityKind.Media)
         {
             compactSize = new VisualSize(
                 compactSize.Width + (LayoutTokens.OverflowBadgeReserve * LayoutTokens.CompactScaleFor(mode)),
@@ -2809,7 +2776,8 @@ public sealed partial class SkiaIslandController : IDisposable
         };
         return new SkiaMotionTarget(
             form, mode, settings.IslandAnchor, compactSize, ghosts, splitCount,
-            State.Kind == IslandStateKind.Hidden);
+            State.Kind == IslandStateKind.Hidden,
+            LockGeometry: true);
     }
 
     /// <summary>Applies the split policy's presentation order to the visible stack.</summary>
@@ -3434,6 +3402,7 @@ public sealed partial class SkiaIslandController : IDisposable
         // animation tick.
         BuildRenderState();
         InvalidateFull();
+        FrameRequested?.Invoke();
 
         if (modeOrAnchorChanged)
         {
@@ -3503,11 +3472,38 @@ private void HandlePageControl(in IslandHitTarget hit)
             return;
         }
 
+        // Message rows are activated only on double click, so a first click cannot open
+        // the source app before a verification code can be copied.
+        if (hit.Control == IslandPageControl.Row
+            && _renderState.Pages.PageSlotAt(hit.PageIndex)?.Kind == PageSlotKind.Notifications) return;
         var action = SkiaIslandControlRouter.Map(hit, _renderState, _pointerX);
         if (action is { } value)
         {
             DispatchControl(value, hit.PageIndex);
         }
+    }
+
+    public bool HandlePointerDoubleClicked(double xDip, double yDip)
+    {
+        if (!_hasRenderState) return false;
+        var hit = SkiaIslandHitTest.Hit(_renderState, xDip, yDip);
+
+        // Double clicking compact notification pill activates the notification app
+        if (hit.Kind == IslandHitKind.Compact && _compact.Kind == ActivityKind.Notification)
+        {
+            DispatchControl(new IslandPlatformAction(IslandPlatformActionKind.NotificationActivate, 0), 0);
+            return true;
+        }
+
+        if (hit.Kind != IslandHitKind.PageControl || hit.Control != IslandPageControl.Row
+            || _renderState.Pages.PageSlotAt(hit.PageIndex)?.Kind != PageSlotKind.Notifications) return false;
+        var row = _renderState.Pages.Notifications.Items;
+        if (hit.Index < 0 || hit.Index >= row.Count) return false;
+
+        // Double clicking a notification row prioritizes activating/jumping to the application
+        var action = new IslandPlatformAction(IslandPlatformActionKind.NotificationActivate, hit.Index);
+        DispatchControl(action, hit.PageIndex);
+        return true;
     }
 
     private bool RaisePluginPageCommand(int page, int rowIndex, bool trailing)
@@ -4385,13 +4381,10 @@ private void HandlePageControl(in IslandHitTarget hit)
         // A design-time/fallback media model can report IsActive without a real timeline. Without a
         // duration the wave is a frozen decorative loop that wakes the host forever; only animate it
         // when the media clock has a real timeline.
-        if (_compact.Kind == ActivityKind.Media && _mediaDurationMs <= 0)
-        {
-            return false;
-        }
-
-        return (_compact.Kind == ActivityKind.Media && _compact.Model.IsActive)
-            || (_compact.Kind == ActivityKind.Notification && _compact.Model.ShowsAudioWave);
+        var waveActive = (_compact.Kind == ActivityKind.Media && _compact.Model.IsActive && _mediaDurationMs > 0)
+            || (_compact.Kind is ActivityKind.Notification or ActivityKind.Clipboard or ActivityKind.FileShelf
+                && NowMs() < _notificationAnimationUntilMs);
+        return waveActive;
     }
 
     private void InvalidateDirty(VisualRect damage)

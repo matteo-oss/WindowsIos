@@ -140,21 +140,109 @@ dotnet run --project src/FluidBar.Cli -- pack --plugin plugins/fluidbar-file-she
 
 ## 项目结构
 
+仓库以 .NET 解决方案 `FluidBar.sln` 为中心。`src/` 中的项目按应用界面、核心状态与策略、绘制、Windows 平台适配和插件基础设施拆分；`tests/` 按对应项目组织单元、集成、架构、界面和长时运行测试。下面列出主要目录及其职责，便于从功能入口追踪到实现与测试。
+
 ```text
-src/
-  FluidBar.App/              Windows 桌面应用、界面与应用组合
-  FluidBar.Core/             核心模型、布局与配置
-  FluidBar.Island/           灵动岛绘制和页面组件
-  FluidBar.Platform.Windows/ Windows 平台集成
-  FluidBar.Plugins.Builtin/  内置插件
-  FluidBar.PluginHost/       插件加载与运行
-  FluidBar.Sdk/              插件 SDK 与契约
-  FluidBar.Marketplace/      插件市场与签名模型
-plugins/                     可选插件及示例
-tests/                       自动化测试项目
-tools/release/               Windows 自包含发布及 ZIP 脚本
-website/                     演示网站
+.
+├─ FluidBar.sln                 主解决方案
+├─ global.json                  .NET SDK 版本选择
+├─ Directory.Build.props        .NET 项目共享构建属性
+├─ NuGet.Config                 NuGet 还原配置
+├─ LICENSE                      项目许可证
+├─ README.md                    项目说明
+├─ LearnMust.md                 学习/开发记录
+├─ src/
+│  ├─ FluidBar.App/             Windows 桌面应用、组合根与界面
+│  │  ├─ Hosting/               生命周期、服务装配与宿主
+│  │  ├─ Island/                灵动岛窗口及展开面板
+│  │  ├─ State/                 展示状态、数据源与内容映射
+│  │  ├─ Views/                 设置、任务、剪贴板、通知等窗口
+│  │  ├─ Plugins/               应用侧插件界面与接入
+│  │  ├─ Rendering/             应用级绘制支持
+│  │  ├─ Assets/                图标等资源
+│  │  ├─ Localization/          应用本地化 JSON
+│  │  └─ Theme/                 字体、设计令牌和宿主布局
+│  ├─ FluidBar.Core/            与 UI/Windows API 解耦的领域模型和策略
+│  │  ├─ Activities/            活动记录、优先级、调度和状态机
+│  │  ├─ Configuration/         配置类型
+│  │  ├─ Events/                事件模型与分发
+│  │  ├─ Interaction/           翻页、滚动等交互策略
+│  │  ├─ Layout/                布局、几何、显示器和位置模型
+│  │  ├─ Media/                 媒体时钟等领域逻辑
+│  │  ├─ Motion/                动画策略
+│  │  ├─ Presentation/          展示状态投影
+│  │  ├─ Settings/              设置模型、存储、迁移和校验
+│  │  ├─ Telemetry/             遥测负载与队列
+│  │  └─ Diagnostics/            诊断接口和计数器
+│  ├─ FluidBar.Island/           灵动岛页面布局与 Skia 绘制
+│  │  ├─ IslandRenderer.cs       岛体渲染入口
+│  │  ├─ PageRenderer*.cs        页面内容绘制
+│  │  ├─ CompactRenderer.cs      收起态绘制
+│  │  ├─ *Layout.cs              媒体、页面、轨道等布局
+│  │  └─ *Painter.cs             材质和玻璃效果绘制
+│  ├─ FluidBar.Platform.Windows/ Windows 原生系统能力适配
+│  │  ├─ Hosting/                原生窗口与分层表面
+│  │  ├─ Interop/                Win32/COM 互操作
+│  │  ├─ Media/                  媒体会话、歌词、音频回环和播放器兼容
+│  │  ├─ Notifications/          系统通知读取与监听
+│  │  ├─ Clipboard/              剪贴板监听和历史
+│  │  ├─ Display/ Monitors/      显示器枚举与策略
+│  │  ├─ Devices/ Radios/        设备信息和无线电开关
+│  │  ├─ Agent/                  外部 Agent 会话及事件接入
+│  │  ├─ Calendar/ Tasks/        日历和任务服务
+│  │  ├─ Shell/                  托盘、启动、热键和系统主题
+│  │  ├─ Focus/ Weather/         专注状态与天气服务
+│  │  ├─ Update/                 更新检查及应用替换
+│  │  └─ Diagnostics/            平台日志和诊断
+│  ├─ FluidBar.Plugins.Builtin/  随主应用提供的内置插件
+│  ├─ FluidBar.PluginHost/       插件发现、加载与生命周期管理
+│  ├─ FluidBar.Sdk/              插件 API、契约、清单和本地化类型
+│  ├─ FluidBar.Marketplace/      市场索引、插件包及签名模型/校验
+│  └─ FluidBar.Cli/              命令行工具（含插件打包命令）
+├─ tests/                        自动化测试与验证程序
+│  ├─ FluidBar.Core.Tests/       核心状态、布局、设置和策略
+│  ├─ FluidBar.Island.Tests/     绘制、布局与 golden 图像回归
+│  ├─ FluidBar.Platform.Tests/   Windows 服务与系统集成边界
+│  ├─ FluidBar.Ui.Tests/         界面模型及视觉行为
+│  ├─ FluidBar.PluginHost.Tests/ 插件宿主测试
+│  ├─ FluidBar.Sdk.Tests/        SDK 契约和清单测试
+│  ├─ FluidBar.BuiltinPlugins.Tests/ 内置插件测试
+│  ├─ FluidBar.OptionalPlugins.Tests/ 可选插件测试
+│  ├─ FluidBar.Integration.Tests/ 跨模块集成测试
+│  ├─ FluidBar.Architecture.Tests/ 项目依赖和架构约束
+│  ├─ FluidBar.Soak/             压力与长时间运行场景
+│  └─ *Evidence/                  验收、设置和市场证据程序
+├─ plugins/
+│  ├─ fluidbar-timer/             倒计时可选插件源码
+│  ├─ fluidbar-file-shelf/        文件暂存可选插件源码
+│  └─ samples/                    最小/完整能力插件示例
+├─ samples/                       SDK 页面扩展示例
+│  ├─ FluidBar.Sample.LocalPages/ 本地页面示例
+│  └─ FluidBar.Sample.OverflowPages/ 溢出页面示例
+├─ marketplace/                   市场目录、索引与公钥材料
+├─ schemas/                       插件、市场、语言和签名 JSON Schema
+├─ telemetry/worker/              公共统计 Worker、SQL schema 和脚本
+├─ tools/
+│  ├─ release/                    Windows 发布、单文件和 ZIP 脚本
+│  ├─ smoke/                      宿主冒烟验证脚本
+│  ├─ perf/                       性能探针
+│  ├─ spikes/                     图形宿主、音频等技术验证项目
+│  ├─ NotificationDbProbe/        通知数据库诊断工具
+│  ├─ agent-emit/                 Agent 事件桥接脚本
+│  └─ dsh-plugin-fluidbar-agent/  DSH Agent 插件适配工具
+├─ build/                          本地构建和发布生成物
+└─ website/                        网站源码区域（当前工作树未包含）
 ```
+
+### 模块职责与依赖边界
+
+- **应用入口**：`FluidBar.App` 启动桌面进程、组合服务、管理窗口，并将系统或插件数据映射为岛上内容。
+- **领域逻辑**：`FluidBar.Core` 保存可独立验证的状态、布局、设置和交互规则，避免直接依赖 Win32 或具体绘图库。
+- **界面绘制与系统适配**：`FluidBar.Island` 将展示状态绘制为灵动岛视觉；`FluidBar.Platform.Windows` 提供窗口、媒体、通知、剪贴板和设备等 Windows 能力，由应用层组合使用。
+- **插件链路**：`FluidBar.Sdk` 定义插件 API，`FluidBar.PluginHost` 管理运行时加载，`FluidBar.Marketplace` 处理市场数据与签名逻辑。`plugins/` 中的插件独立构建并以 `.fbp` 安装；内置插件由 `FluidBar.Plugins.Builtin` 随应用提供。
+- **验证链路**：`tests/` 对应覆盖领域规则、绘制、平台适配、插件和跨模块行为；`tests/FluidBar.Island.Tests/golden/` 存放图像回归基准。
+
+`build/` 通常由构建或发布脚本生成。`website/` 在当前工作树中不存在，因此此处仅标注仓库的网站源码区域，不表示它可以在当前检出版本中构建。
 
 ## 问题反馈与贡献
 

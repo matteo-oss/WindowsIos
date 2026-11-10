@@ -873,11 +873,11 @@ public static class PageLayout
 
     // ---- widgets page ---------------------------------------------------------------------
 
-    /// <summary>Calendar card rectangle (200 DIP wide, fills the body band).</summary>
-    public static SKRect WidgetsCalendar(SKRect page) => new(page.Left + 16, page.Top + 28, page.Left + 216, page.Top + 260);
+    /// <summary>Compact calendar inside the planner band.</summary>
+    public static SKRect WidgetsCalendar(SKRect page) => new(page.Left + 16, page.Top + 108, page.Left + 166, page.Top + 260);
 
     /// <summary>Right widget column rectangle (160 DIP wide).</summary>
-    public static SKRect WidgetsSide(SKRect page) => new(page.Left + 224, page.Top + 28, page.Right - 16, page.Top + 260);
+    public static SKRect WidgetsSide(SKRect page) => new(page.Left + 172, page.Top + 108, page.Right - 16, page.Top + 260);
 
     /// <summary>Weather card rectangle (54 DIP high).</summary>
     public static SKRect WidgetsWeather(SKRect page) => new(page.Left + 224, page.Top + 28, page.Right - 16, page.Top + 82);
@@ -886,7 +886,7 @@ public static class PageLayout
     public static SKRect WidgetsStats(SKRect page) => new(page.Left + 224, page.Top + 88, page.Right - 16, page.Top + 162);
 
     /// <summary>Task card rectangle (76 DIP high).</summary>
-    public static SKRect WidgetsNotes(SKRect page) => new(page.Left + 224, page.Top + 168, page.Right - 16, page.Top + 260);
+    public static SKRect WidgetsNotes(SKRect page) => new(page.Left + 16, page.Top + 28, page.Right - 16, page.Top + 102);
 
     /// <summary>Task card title and add affordance open task management.</summary>
     public static SKRect WidgetsTaskManage(SKRect page)
@@ -897,22 +897,25 @@ public static class PageLayout
 
     /// <summary>Calendar month navigation button rectangle (18 DIP square).</summary>
     public static SKRect WidgetsCalendarNav(SKRect page, bool previous)
-        => new(previous ? page.Left + 170 : page.Left + 190, page.Top + 37, previous ? page.Left + 188 : page.Left + 208, page.Top + 55);
+        => new(previous ? page.Left + 120 : page.Left + 140, page.Top + 115, previous ? page.Left + 138 : page.Left + 158, page.Top + 133);
 
     /// <summary>Calendar grid cell rectangle for a Monday-first cell index (0..41).</summary>
     public static SKRect WidgetsCalendarCell(SKRect page, int index)
     {
-        const float cellWidth = 180f / 7f;
+        const float cellWidth = 130f / 7f;
         var column = index % 7;
         var row = index / 7;
         var left = page.Left + 26 + (column * cellWidth);
-        var top = page.Top + 74 + (row * 22);
-        return new SKRect(left, top, left + cellWidth, top + 22);
+        var top = page.Top + 151 + (row * 16);
+        return new SKRect(left, top, left + cellWidth, top + 16);
     }
 
     /// <summary>Task row rectangle for an index (up to three rows).</summary>
     public static SKRect WidgetsTaskRow(SKRect page, int index)
-        => new(page.Left + 234, page.Top + 192 + (index * 15), page.Right - 26, page.Top + 207 + (index * 15));
+        => new(page.Left + 26, page.Top + 52 + (index * 18), page.Right - 26, page.Top + 70 + (index * 18));
+
+    public static SKRect WidgetsScheduleRow(SKRect page, int index)
+        => new(page.Left + 182, page.Top + 132 + (index * 23), page.Right - 26, page.Top + 153 + (index * 23));
 
     /// <summary>Hit-tests an expanded page's controls; returns the control and page-relative index.</summary>
     public static IslandPageControl HitTest(int page, SKRect pageRect, float x, float y, out int index)

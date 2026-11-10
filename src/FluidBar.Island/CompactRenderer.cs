@@ -60,17 +60,27 @@ internal sealed class CompactRenderer : IDisposable
             return;
         }
 
+        var activity = state.Compact;
+        var kind = activity?.Kind ?? ActivityKind.Idle;
         var visualScale = (float)LayoutTokens.CompactScaleFor(state.Mode);
         canvas.Save();
         canvas.Scale(visualScale, visualScale);
 
-        var activity = state.Compact;
-        var kind = activity?.Kind ?? ActivityKind.Idle;
         var model = activity?.Model ?? EmptyModel;
         // The +N chip owns a reserved column at the right edge; every compact layout is measured
         // against the remaining content width so no text can run under (or be clipped by) the chip.
         var width = IslandMetrics.CompactContentWidth(state) / visualScale;
         var height = (float)state.ShellHeight / visualScale;
+
+        var animated = state.Form == ShellForm.Compact && !_reduced && ((kind == ActivityKind.Media && model.IsActive)
+            || kind is ActivityKind.Notification or ActivityKind.Clipboard or ActivityKind.FileShelf);
+        if (animated)
+        {
+            var pulse = 1f + (0.012f * (0.5f + (0.5f * MathF.Sin((float)_phase * MathF.PI * 2f / 1.8f))));
+            canvas.Translate(width / 2, height / 2);
+            canvas.Scale(pulse, pulse);
+            canvas.Translate(-width / 2, -height / 2);
+        }
 
         switch (kind)
         {
@@ -105,6 +115,7 @@ internal sealed class CompactRenderer : IDisposable
                 break;
         }
 
+        if (animated) DrawMediaShimmer(canvas, width, height, _accents.Get(model.AccentHex, _theme.TrackAccent));
         canvas.Restore();
     }
 
@@ -177,6 +188,37 @@ internal sealed class CompactRenderer : IDisposable
             DrawTrack(canvas, track, Math.Clamp(model.ProgressPercent / 100.0, 0, 1), accent,
                 SKColors.White.WithAlpha(20));
         }
+    }
+
+    private void DrawMediaShimmer(SKCanvas canvas, float width, float height, SKColor accent)
+    {
+        var travel = width + 80f;
+        var center = (float)((_phase * 52.0) % travel) - 40f;
+        var colors = new[]
+        {
+            SKColors.Transparent,
+            Alpha(accent, 0.08f * _opacity),
+            Alpha(SKColors.White, 0.28f * _opacity),
+            Alpha(accent, 0.08f * _opacity),
+            SKColors.Transparent,
+        };
+        using var shimmer = SKShader.CreateLinearGradient(
+            new SKPoint(center - 28f, 0), new SKPoint(center + 28f + (height * 0.7f), height),
+            colors, null, SKShaderTileMode.Clamp);
+
+        _fill.Style = SKPaintStyle.Fill;
+        _fill.Shader = shimmer;
+        _fill.Color = SKColors.White;
+        canvas.DrawRoundRect(new SKRect(0, 0, width, height), height / 2, height / 2, _fill);
+
+        _stroke.Style = SKPaintStyle.Stroke;
+        _stroke.StrokeWidth = 1f;
+        _stroke.Shader = shimmer;
+        _stroke.Color = SKColors.White;
+        canvas.DrawRoundRect(new SKRect(0.5f, 0.5f, width - 0.5f, height - 0.5f),
+            (height - 1f) / 2, (height - 1f) / 2, _stroke);
+        _stroke.Shader = null;
+        _fill.Shader = null;
     }
 
     /// <summary>Draws the live lyric line with its fade-in and karaoke sweep, clipped to the text column.</summary>
@@ -330,24 +372,40 @@ internal sealed class CompactRenderer : IDisposable
             DrawWave(canvas, wave, new SKColor(0xB6, 0xE0, 0xEE), active: true);
         }
 
-        // A Windows notification gets a soft moving highlight. Reduced-motion keeps the card static.
+        // Dynamic diagonal streamer light effect across card surface and border. Reduced-motion keeps the card static.
         if (!_reduced)
         {
-            var travel = width + (120f * s);
-            var center = (float)((_phase * 150.0) % travel) - (60f * s);
-            var glowWidth = 54f * s;
-            var glowRect = new SKRect(center - glowWidth, 0, center + glowWidth, height);
+            var travel = width + (160f * s);
+            var center = (float)((_phase * 160.0) % travel) - (80f * s);
+            var glowWidth = 60f * s;
+            var slant = height * 0.75f;
             var colors = new[]
             {
                 SKColors.Transparent,
-                Alpha(new SKColor(0xB6, 0xE0, 0xEE), 0.20f * _opacity),
+                Alpha(new SKColor(0xFF, 0xFF, 0xFF), 0.08f * _opacity),
+                Alpha(new SKColor(0xB6, 0xE0, 0xEE), 0.28f * _opacity),
+                Alpha(new SKColor(0xFF, 0xFF, 0xFF), 0.40f * _opacity),
+                Alpha(new SKColor(0xB6, 0xE0, 0xEE), 0.28f * _opacity),
+                Alpha(new SKColor(0xFF, 0xFF, 0xFF), 0.08f * _opacity),
                 SKColors.Transparent,
             };
             using var glow = SKShader.CreateLinearGradient(
-                new SKPoint(glowRect.Left, 0), new SKPoint(glowRect.Right, 0), colors, null, SKShaderTileMode.Clamp);
+                new SKPoint(center - glowWidth, 0),
+                new SKPoint(center + glowWidth + slant, height),
+                colors,
+                null,
+                SKShaderTileMode.Clamp);
             _fill.Shader = glow;
             _fill.Color = SKColors.White;
-            canvas.DrawRoundRect(glowRect, height / 2, height / 2, _fill);
+            canvas.DrawRoundRect(new SKRect(0, 0, width, height), height / 2, height / 2, _fill);
+
+            // Diagonal streamer border stroke
+            _stroke.Shader = glow;
+            _stroke.StrokeWidth = 1.5f * s;
+            _stroke.Style = SKPaintStyle.Stroke;
+            _stroke.Color = SKColors.White;
+            canvas.DrawRoundRect(new SKRect(0.75f * s, 0.75f * s, width - 0.75f * s, height - 0.75f * s), (height / 2) - (0.75f * s), (height / 2) - (0.75f * s), _stroke);
+            _stroke.Shader = null;
             _fill.Shader = null;
         }
 

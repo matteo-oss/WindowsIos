@@ -24,7 +24,23 @@ public enum TaskListStatus
 /// <summary>One task row from <c>%APPDATA%\\FluidBar\\tasks.json</c>.</summary>
 /// <param name="Title">Task title (never blank).</param>
 /// <param name="Done">Checkbox state.</param>
-public readonly record struct TaskItemData(string Title, bool Done);
+public enum TaskPriority
+{
+    Low,
+    Normal,
+    High,
+}
+
+public readonly record struct TaskItemData(
+    string Title,
+    bool Done,
+    DateOnly? Date = null,
+    TimeOnly? StartTime = null,
+    TimeOnly? EndTime = null,
+    TaskPriority Priority = TaskPriority.Normal,
+    string? Category = null,
+    DateTimeOffset? ReminderAt = null,
+    DateTimeOffset? ReminderDismissedAt = null);
 
 /// <summary>Immutable snapshot of the task file.</summary>
 /// <param name="Items">Tasks in file order (the card paints the first three).</param>
@@ -197,6 +213,17 @@ public sealed class TaskListService : PlatformMonitor<TaskListSnapshot>
     public Task<ToggleTaskResult> AddAsync(string title, CancellationToken cancellationToken = default)
         => MutateAsync("add", -1, title, null, cancellationToken);
 
+    public Task<ToggleTaskResult> AddScheduledAsync(string title, DateOnly date, TimeOnly time,
+        TimeOnly? endTime = null, TaskPriority priority = TaskPriority.Normal, string? category = null,
+        DateTimeOffset? reminderAt = null,
+        CancellationToken cancellationToken = default)
+        => MutateAsync("add", -1, title, null, cancellationToken, date, time, endTime, priority, category, reminderAt);
+
+    public Task<ToggleTaskResult> UpdateAsync(int index, string title, DateOnly? date, TimeOnly? time,
+        TimeOnly? endTime, TaskPriority priority, string? category,
+        TaskListSnapshot? expectedSnapshot, DateTimeOffset? reminderAt = null, CancellationToken cancellationToken = default)
+        => MutateAsync("update", index, title, expectedSnapshot, cancellationToken, date, time, endTime, priority, category, reminderAt);
+
     /// <summary>Changes one title without modifying the remaining task data.</summary>
     public Task<ToggleTaskResult> RenameAsync(int index, string title, CancellationToken cancellationToken = default,
         TaskListSnapshot? expectedSnapshot = null)
@@ -208,7 +235,9 @@ public sealed class TaskListService : PlatformMonitor<TaskListSnapshot>
         => MutateAsync("remove", index, null, expectedSnapshot, cancellationToken);
 
     private Task<ToggleTaskResult> MutateAsync(string operation, int index, string? title,
-        TaskListSnapshot? expectedSnapshot, CancellationToken cancellationToken)
+        TaskListSnapshot? expectedSnapshot, CancellationToken cancellationToken, DateOnly? date = null,
+        TimeOnly? startTime = null, TimeOnly? endTime = null, TaskPriority priority = TaskPriority.Normal,
+        string? category = null, DateTimeOffset? reminderAt = null)
         => Task.Run(async () =>
     {
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -231,7 +260,7 @@ public sealed class TaskListService : PlatformMonitor<TaskListSnapshot>
                 return new ToggleTaskResult(false, "task index out of range", snapshot);
             }
 
-            if (operation is "add" or "rename"
+            if (operation is "add" or "rename" or "update"
                 && (string.IsNullOrWhiteSpace(title) || title.Length > Math.Max(1, _options.MaxTitleLength)))
                 return new ToggleTaskResult(false, "invalid task title", snapshot);
 
@@ -254,10 +283,28 @@ public sealed class TaskListService : PlatformMonitor<TaskListSnapshot>
                 {
                     if (rows.Length >= Math.Max(1, _options.MaxTasks))
                         return new ToggleTaskResult(false, "task limit reached", snapshot);
-                    document.Add(new JsonObject { ["title"] = title, ["done"] = false });
+                    document.Add(new JsonObject { ["title"] = title, ["done"] = false,
+                        ["date"] = date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                        ["startTime"] = startTime?.ToString("HH:mm", CultureInfo.InvariantCulture),
+                        ["endTime"] = endTime?.ToString("HH:mm", CultureInfo.InvariantCulture),
+                        ["priority"] = priority.ToString().ToLowerInvariant(),
+                        ["category"] = string.IsNullOrWhiteSpace(category) ? null : category.Trim(),
+                        ["reminderAt"] = reminderAt?.ToString("O", CultureInfo.InvariantCulture),
+                        ["reminderDismissedAt"] = null });
                 }
                 else if (operation == "remove") document.Remove(rows[index]);
                 else if (operation == "rename") rows[index]["title"] = title;
+                else if (operation == "update")
+                {
+                    rows[index]["title"] = title;
+                    rows[index]["date"] = date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    rows[index]["startTime"] = startTime?.ToString("HH:mm", CultureInfo.InvariantCulture);
+                    rows[index]["endTime"] = endTime?.ToString("HH:mm", CultureInfo.InvariantCulture);
+                    rows[index]["priority"] = priority.ToString().ToLowerInvariant();
+                    rows[index]["category"] = string.IsNullOrWhiteSpace(category) ? null : category.Trim();
+                    rows[index]["reminderAt"] = reminderAt?.ToString("O", CultureInfo.InvariantCulture);
+                    rows[index]["reminderDismissedAt"] = null;
+                }
                 else rows[index]["done"] = !snapshot.Items[index].Done;
                 json = document.ToJsonString(JsonSerializerOptions) + Environment.NewLine;
 
@@ -346,7 +393,27 @@ public sealed class TaskListService : PlatformMonitor<TaskListSnapshot>
 
                 var done = element.TryGetProperty("done", out var doneElement)
                            && doneElement.ValueKind == JsonValueKind.True;
-                builder.Add(new TaskItemData(titleElement.GetString()!, done));
+                DateOnly? date = element.TryGetProperty("date", out var dateElement) && dateElement.ValueKind == JsonValueKind.String
+                    && DateOnly.TryParse(dateElement.GetString(), CultureInfo.InvariantCulture, out var parsedDate) ? parsedDate : null;
+                TimeOnly? startTime = element.TryGetProperty("startTime", out var timeElement) && timeElement.ValueKind == JsonValueKind.String
+                    && TimeOnly.TryParse(timeElement.GetString(), CultureInfo.InvariantCulture, out var parsedTime) ? parsedTime : null;
+                TimeOnly? endTime = element.TryGetProperty("endTime", out var endElement) && endElement.ValueKind == JsonValueKind.String
+                    && TimeOnly.TryParse(endElement.GetString(), CultureInfo.InvariantCulture, out var parsedEnd) ? parsedEnd : null;
+                var priority = element.TryGetProperty("priority", out var priorityElement)
+                    && priorityElement.ValueKind == JsonValueKind.String
+                    && Enum.TryParse<TaskPriority>(priorityElement.GetString(), true, out var parsedPriority)
+                        ? parsedPriority : TaskPriority.Normal;
+                var category = element.TryGetProperty("category", out var categoryElement)
+                    && categoryElement.ValueKind == JsonValueKind.String ? categoryElement.GetString() : null;
+                DateTimeOffset? reminderAt = element.TryGetProperty("reminderAt", out var reminderElement)
+                    && reminderElement.ValueKind == JsonValueKind.String
+                    && DateTimeOffset.TryParse(reminderElement.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsedReminder)
+                    ? parsedReminder : null;
+                DateTimeOffset? dismissedAt = element.TryGetProperty("reminderDismissedAt", out var dismissedElement)
+                    && dismissedElement.ValueKind == JsonValueKind.String
+                    && DateTimeOffset.TryParse(dismissedElement.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsedDismissed)
+                    ? parsedDismissed : null;
+                builder.Add(new TaskItemData(titleElement.GetString()!, done, date, startTime, endTime, priority, category, reminderAt, dismissedAt));
             }
 
             return new TaskListSnapshot(builder.ToImmutable(), TaskListStatus.Ok, path, null);
@@ -362,7 +429,18 @@ public sealed class TaskListService : PlatformMonitor<TaskListSnapshot>
     public static string Serialize(IEnumerable<TaskItemData> items)
     {
         ArgumentNullException.ThrowIfNull(items);
-        var payload = items.Select(item => new { title = item.Title, done = item.Done }).ToArray();
+        var payload = items.Select(item => new
+        {
+            title = item.Title,
+            done = item.Done,
+            date = item.Date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            startTime = item.StartTime?.ToString("HH:mm", CultureInfo.InvariantCulture),
+            endTime = item.EndTime?.ToString("HH:mm", CultureInfo.InvariantCulture),
+            priority = item.Priority.ToString().ToLowerInvariant(),
+            category = item.Category,
+            reminderAt = item.ReminderAt?.ToString("O", CultureInfo.InvariantCulture),
+            reminderDismissedAt = item.ReminderDismissedAt?.ToString("O", CultureInfo.InvariantCulture),
+        }).ToArray();
         return JsonSerializer.Serialize(payload, JsonSerializerOptions) + Environment.NewLine;
     }
 

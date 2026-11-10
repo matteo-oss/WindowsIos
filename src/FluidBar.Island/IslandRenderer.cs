@@ -746,9 +746,9 @@ public sealed class IslandRenderer : IDisposable
 
         var materialGlass = _theme.Material == IslandMaterial.SimulatedGlass;
         var fillOpacity = _theme.Material == IslandMaterial.LiquidGlass
-            ? (float)LiquidGlassTokens.FillOpacity
+            ? (float)Math.Clamp(_theme.FillOpacity, LayoutTokens.MinFillOpacity, 1.0)
             : materialGlass
-                ? 0.72f
+                ? (float)Math.Clamp(_theme.FillOpacity, LayoutTokens.MinFillOpacity, 1.0)
                 : (float)Math.Clamp(_theme.FillOpacity, LayoutTokens.MinFillOpacity, 1.0);
         var offsets = new[] { LayoutTokens.GhostOffsetY1, LayoutTokens.GhostOffsetY2 };
         var scales = new[] { LayoutTokens.GhostScale1, LayoutTokens.GhostScale2 };
@@ -888,9 +888,9 @@ public sealed class IslandRenderer : IDisposable
 
         var finals = IslandMetrics.SplitIsletRects(state);
         var fillOpacity = _theme.Material == IslandMaterial.LiquidGlass
-            ? (float)LiquidGlassTokens.FillOpacity
+            ? (float)Math.Clamp(_theme.FillOpacity, LayoutTokens.MinFillOpacity, 1.0)
             : _theme.Material == IslandMaterial.SimulatedGlass
-                ? 0.72f
+                ? (float)Math.Clamp(_theme.FillOpacity, LayoutTokens.MinFillOpacity, 1.0)
                 : (float)Math.Clamp(_theme.FillOpacity, LayoutTokens.MinFillOpacity, 1.0);
         for (var i = 0; i < finals.Length && i < state.SplitIslets.Length; i++)
         {
@@ -1034,9 +1034,9 @@ public sealed class IslandRenderer : IDisposable
         var materialGlass = _theme.Material == IslandMaterial.SimulatedGlass;
         var materialLiquid = _theme.Material == IslandMaterial.LiquidGlass;
         var fillOpacity = materialLiquid
-            ? (float)LiquidGlassTokens.FillOpacity
+            ? (float)Math.Clamp(_theme.FillOpacity, LayoutTokens.MinFillOpacity, 1.0)
             : materialGlass
-                ? 0.72f
+                ? (float)Math.Clamp(_theme.FillOpacity, LayoutTokens.MinFillOpacity, 1.0)
                 : (float)Math.Clamp(_theme.FillOpacity, LayoutTokens.MinFillOpacity, 1.0);
 
         // Liquid glass blurs the real desktop behind the shell when the host provides a capture.

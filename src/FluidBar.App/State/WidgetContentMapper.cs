@@ -94,7 +94,8 @@ public static class WidgetContentMapper
     /// <param name="snapshot">Task snapshot (null before the service produced one).</param>
     /// <param name="localizer">Localizer for the empty caption.</param>
     /// <param name="filePath">Path used for the caption when the snapshot carries none.</param>
-    public static WidgetTaskView MapTasks(TaskListSnapshot? snapshot, ILocalizer? localizer = null, string? filePath = null)
+    public static WidgetTaskView MapTasks(TaskListSnapshot? snapshot, ILocalizer? localizer = null, string? filePath = null,
+        DateOnly? selectedDate = null)
     {
         if (snapshot is null || snapshot.Count == 0)
         {
@@ -105,16 +106,37 @@ public static class WidgetContentMapper
             return new WidgetTaskView([], hint, 0);
         }
 
-        var total = snapshot!.Count;
+        var source = selectedDate is null ? snapshot!.Items : snapshot!.Items
+            .Where(item => item.Date is null || item.Date == selectedDate)
+            .OrderBy(item => item.Date is null ? 0 : 1)
+            .ThenBy(item => item.StartTime ?? TimeOnly.MaxValue)
+            .ToImmutableArray();
+        var total = source.Length;
+        if (total == 0)
+        {
+            var hint = localizer?.Get("Tasks.Manage.CardEmpty") ?? "Add your first task";
+            return new WidgetTaskView([], hint, 0);
+        }
+
         var rows = ImmutableArray.CreateBuilder<WidgetTaskData>(Math.Min(MaxRenderedTasks, total));
-        foreach (var item in snapshot.Items)
+        foreach (var item in source)
         {
             if (rows.Count >= MaxRenderedTasks)
             {
                 break;
             }
 
-            rows.Add(new WidgetTaskData { Title = item.Title, Done = item.Done });
+            rows.Add(new WidgetTaskData
+            {
+                Title = item.Title,
+                Done = item.Done,
+                TimeText = item.Date is { } date
+                    ? $"{date:MM-dd} {item.StartTime:HH:mm}" + (item.EndTime is { } end ? $"-{end:HH:mm}" : string.Empty)
+                    : item.StartTime is { } time ? item.EndTime is { } scheduledEnd ? $"{time:HH:mm}-{scheduledEnd:HH:mm}" : $"{time:HH:mm}"
+                    : null,
+                Priority = item.Priority,
+                Category = item.Category,
+            });
         }
 
         var more = Math.Max(0, total - rows.Count);
@@ -124,9 +146,9 @@ public static class WidgetContentMapper
         return new WidgetTaskView(
             rows.MoveToImmutable(),
             null,
-            snapshot.DoneCount,
+            source.Count(item => item.Done),
             moreText,
-            $"{snapshot.DoneCount}/{total}",
+            $"{source.Count(item => item.Done)}/{total}",
             total);
     }
 

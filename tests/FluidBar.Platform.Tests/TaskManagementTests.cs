@@ -94,6 +94,50 @@ public sealed class TaskManagementTests : IDisposable
         File.WriteAllText(FilePath, json);
     }
 
+    [Fact]
+    public async Task ScheduledTasks_RoundTripEditAndRejectStaleSnapshot()
+    {
+        await using var service = Create();
+        var date = new DateOnly(2026, 11, 7);
+        var added = await service.AddScheduledAsync("meeting", date, new TimeOnly(9, 30));
+        Assert.True(added.Succeeded);
+        Assert.Equal(date, service.Load().Items[0].Date);
+        var edited = await service.UpdateAsync(0, "new", date.AddDays(1), new TimeOnly(10, 0),
+            new TimeOnly(11, 0), TaskPriority.High, "Work", added.Snapshot);
+        Assert.True(edited.Succeeded);
+        Assert.Equal(new TimeOnly(10, 0), service.Load().Items[0].StartTime);
+        Assert.False((await service.UpdateAsync(0, "stale", date, null, null,
+            TaskPriority.Normal, null, added.Snapshot)).Succeeded);
+    }
+
+    [Fact]
+    public void OptionalSchedule_InvalidTypesDoNotBreakLegacyTasks()
+    {
+        var parsed = TaskListService.Parse("""[{"title":"old"},{"title":"bad","date":12,"startTime":false}]""", true, "tasks.json");
+        Assert.Equal(2, parsed.Count);
+        Assert.All(parsed.Items, item => Assert.Null(item.Date));
+    }
+
+    [Fact]
+    public async Task Reminder_RoundTripsAndEditResetsDismissedState()
+    {
+        await using var service = Create();
+        var date = new DateOnly(2026, 11, 7);
+        var reminder = new DateTimeOffset(2026, 11, 7, 9, 25, 0, TimeSpan.FromHours(8));
+        var added = await service.AddScheduledAsync("review", date, new TimeOnly(9, 30), reminderAt: reminder);
+        Assert.True(added.Succeeded);
+        Assert.Equal(reminder, service.Load().Items[0].ReminderAt);
+
+        var json = File.ReadAllText(FilePath).Replace("\"reminderDismissedAt\": null", "\"reminderDismissedAt\": \"2026-11-07T09:26:00+08:00\"");
+        File.WriteAllText(FilePath, json);
+        var current = service.Load();
+        Assert.NotNull(current.Items[0].ReminderDismissedAt);
+        var changed = await service.UpdateAsync(0, "review", date, new TimeOnly(9, 30), null,
+            TaskPriority.Normal, null, current, reminder);
+        Assert.True(changed.Succeeded);
+        Assert.Null(service.Load().Items[0].ReminderDismissedAt);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);

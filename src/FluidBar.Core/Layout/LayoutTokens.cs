@@ -35,6 +35,12 @@ public static class LayoutTokens
     /// <summary>Default visual scale for compact pills in float and flush modes.</summary>
     public const double CompactVisualScale = 1.5;
 
+    /// <summary>
+    /// Default idle capsule scale. The idle pill is intentionally two thirds of the other compact
+    /// surfaces while notifications, media and expanded content retain their established sizes.
+    /// </summary>
+    public const double IdleCompactVisualScale = CompactVisualScale * (2.0 / 3.0);
+
     /// <summary>Default visual scale for the expanded island.</summary>
     public const double ExpandedVisualScale = 1.3;
 
@@ -396,7 +402,9 @@ public static class LayoutTokens
     private static VisualSize CompactBaseSize(Activities.ActivityKind? kind) => kind switch
     {
         null or Activities.ActivityKind.Idle => IdleSize,
-        Activities.ActivityKind.Media => MediaSize,
+        // Media shares the exact idle capsule geometry. Playback animation is paint-only and must
+        // never resize the host window or hit region.
+        Activities.ActivityKind.Media => IdleSize,
         Activities.ActivityKind.Volume => HudSize,
         Activities.ActivityKind.Brightness => HudSize,
         Activities.ActivityKind.Notification => NotificationSize,
@@ -416,17 +424,31 @@ public static class LayoutTokens
 
     /// <summary>Compact size of an activity kind in the default floating presentation.</summary>
     public static VisualSize CompactSize(Activities.ActivityKind? kind)
-        => Scale(CompactBaseSize(kind), CompactVisualScale);
+    {
+        _ = kind;
+        return Scale(CompactBaseSize(null), IdleCompactVisualScale);
+    }
 
     /// <summary>Visual scale used by compact content in a presentation mode.</summary>
     public static double CompactScaleFor(IslandMode mode)
         => mode == IslandMode.Dock ? 1.0 : CompactVisualScale;
 
+    /// <summary>Visual scale for a compact activity; the default idle capsule uses its reduced size.</summary>
+    public static double CompactScaleFor(Activities.ActivityKind? kind, IslandMode mode)
+        => mode == IslandMode.Dock
+            ? 1.0
+            : kind is null or Activities.ActivityKind.Idle or Activities.ActivityKind.Media
+                ? IdleCompactVisualScale
+                : CompactVisualScale;
+
     /// <summary>Compact size for a mode: dock keeps its fixed strip while float/flush use 2x pills.</summary>
     public static VisualSize CompactSize(Activities.ActivityKind? kind, IslandMode mode)
-        => mode == IslandMode.Dock
+    {
+        _ = kind;
+        return mode == IslandMode.Dock
             ? new VisualSize(DockStripWidth, DockStripHeight)
-            : CompactSize(kind);
+            : CompactSize(null);
+    }
 
     /// <summary>Minimum supported island font scale (settings → appearance).</summary>
     public const double MinFontScale = 0.8;
@@ -443,17 +465,9 @@ public static class LayoutTokens
     /// <param name="fontScale">Island font scale (0.8–1.6).</param>
     public static VisualSize CompactSizeFor(Activities.ActivityKind? kind, IslandMode mode, double fontScale)
     {
-        var size = CompactSize(kind, mode);
-        var scale = double.IsFinite(fontScale) ? Math.Clamp(fontScale, MinFontScale, MaxFontScale) : 1.0;
-        if (Math.Abs(scale - 1.0) < 1e-9)
-        {
-            return size;
-        }
-
-        var maxWidth = mode == IslandMode.Dock ? ExpandedWidth : NotificationMaxWidth;
-        return new VisualSize(
-                Math.Min(maxWidth, Math.Round(size.Width * scale, 2)),
-                Math.Min(ExpandedHeight, Math.Round(size.Height * scale, 2)));
+        _ = kind;
+        _ = fontScale;
+        return CompactSize(null, mode);
     }
 
     private static VisualSize Scale(VisualSize size, double scale)

@@ -79,8 +79,12 @@ public enum IslandPlatformActionKind
     /// <summary>Open the keyboard-capable task manager.</summary>
     TaskManage,
 
+    /// <summary>Open the memo manager.</summary>
+    MemoManage,
+
     /// <summary>Navigate the widgets calendar; <see cref="IslandPlatformAction.Value"/> is -1 or +1.</summary>
     CalendarNavigate,
+    CalendarSelectDay,
 
     /// <summary>Open a selectable text/image preview for a clipboard row.</summary>
     ClipboardPreview,

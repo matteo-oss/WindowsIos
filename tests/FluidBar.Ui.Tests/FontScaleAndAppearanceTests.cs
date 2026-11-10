@@ -44,6 +44,36 @@ public sealed class FontScaleAndAppearanceTests
     }
 
     [Fact]
+    public void Expanded_panel_radius_changes_apply_live_without_reopening()
+    {
+        using var fixture = ControllerFixture.Create(AppSettings.Default with { AutoCollapseMs = 0 });
+        fixture.ExpandAndSettle();
+        Assert.Equal(30, fixture.Controller.RenderState.ShellRadii.TopLeft, 3);
+
+        fixture.Settings.Update(s => s with { PanelRadius = 16 });
+
+        Assert.Equal(16, fixture.Controller.RenderState.ShellRadii.TopLeft, 3);
+    }
+
+    [Fact]
+    public void Appearance_settings_repaint_the_expanded_shell_immediately()
+    {
+        using var fixture = ControllerFixture.Create(AppSettings.Default with
+        {
+            AutoCollapseMs = 0,
+            Material = App.Settings.IslandMaterial.Obsidian,
+        });
+        fixture.ExpandAndSettle();
+
+        fixture.Settings.Update(s => s with { PanelRadius = 16, FontScale = 1.4, FillOpacity = 0.9 });
+
+        var state = fixture.Controller.RenderState;
+        Assert.Equal(16, state.ShellRadii.TopLeft, 3);
+        Assert.Equal(1.4, state.FontScale, 3);
+        Assert.Equal(0.9, state.Theme.FillOpacity, 3);
+    }
+
+    [Fact]
     public void Large_font_pages_scroll_with_the_wheel_before_turning_the_page()
     {
         using var fixture = ControllerFixture.Create(AppSettings.Default with { FontScale = 1.6, AutoCollapseMs = 0 });
@@ -90,6 +120,24 @@ public sealed class FontScaleAndAppearanceTests
         Assert.True(fixture.Controller.RenderState.FollowBackdropPalette,
             "liquid glass must follow the captured backdrop, not freeze grey ink on white glass");
         Assert.Equal(IslandThemeMode.Dark, fixture.Controller.RenderState.Theme.Mode);
+    }
+
+    [Theory]
+    [InlineData(App.Settings.IslandMaterial.Obsidian)]
+    [InlineData(App.Settings.IslandMaterial.Acrylic)]
+    [InlineData(App.Settings.IslandMaterial.LiquidGlass)]
+    public void Fill_opacity_changes_apply_live_for_every_material(App.Settings.IslandMaterial material)
+    {
+        using var fixture = ControllerFixture.Create(AppSettings.Default with
+        {
+            AutoCollapseMs = 0,
+            Material = material,
+        });
+        fixture.Settle();
+
+        fixture.Settings.Update(s => s with { FillOpacity = 0.9 });
+
+        Assert.Equal(0.9, fixture.Controller.RenderState.Theme.FillOpacity, 3);
     }
 
     [Fact]

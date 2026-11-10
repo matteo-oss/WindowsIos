@@ -413,7 +413,7 @@ public static class PageMetricsLayout
     }
 
     /// <summary>Task rows the widgets card paints; longer files get the localized "N more" line.</summary>
-    public const int MaxPaintedTaskRows = 8;
+    public const int MaxPaintedTaskRows = 5;
 
     /// <summary>Widgets task row pitch (label line height plus the fixed gap).</summary>
     public static float WidgetsTaskPitch(in FontScaleMetrics metrics) => 15 + metrics.LineGrow(IslandType.TaskLabel);
@@ -430,13 +430,13 @@ public static class PageMetricsLayout
     /// <param name="taskCount">Tasks the card will paint.</param>
     public static SKRect WidgetsNotes(SKRect page, in FontScaleMetrics metrics, int taskCount)
     {
-        var top = WidgetsStats(page, metrics).Bottom + 6;
+        var top = page.Top + 28;
         var pitch = WidgetsTaskPitch(metrics);
         // Painted rows plus one optional "N more" line may extend the card.
-        var rows = Math.Max(3, Math.Clamp(taskCount, 0, MaxPaintedTaskRows + 1));
+        var rows = Math.Max(2, Math.Clamp(taskCount, 0, MaxPaintedTaskRows + 1));
         var content = 7 + 14 + metrics.LineGrow(IslandType.NotesHead) + 10
             + ((rows - 1) * pitch) + (15 + metrics.LineGrow(IslandType.TaskLabel)) + 4;
-        return new SKRect(page.Left + 224, top, page.Right - 16, top + Math.Max(92, content));
+        return new SKRect(page.Left + 16, top, page.Right - 16, Math.Min(page.Top + 102, top + Math.Max(68, content)));
     }
 
     /// <summary>Widgets task row rectangle; the pitch follows the task line height and the card top.</summary>
@@ -444,15 +444,25 @@ public static class PageMetricsLayout
     {
         var card = WidgetsNotes(page, metrics);
         var pitch = WidgetsTaskPitch(metrics);
-        var top = card.Top + 24 + (index * pitch);
+        var top = card.Top + 24 + (index * Math.Min(pitch, 18));
         return new SKRect(card.Left + 10, top, card.Right - 10, top + pitch);
     }
+
+    public static SKRect WidgetsScheduleRow(SKRect page, int index, in FontScaleMetrics metrics)
+        => PageLayout.WidgetsScheduleRow(page, index);
 
     /// <summary>Task card title and add button hit area, shared with rendering and accessibility.</summary>
     public static SKRect WidgetsTaskManage(SKRect page, in FontScaleMetrics metrics)
     {
+        var card = PageLayout.WidgetsSide(page);
+        return new SKRect(card.Right - 76, card.Top + 3, card.Right - 6, card.Top + 23);
+    }
+
+    /// <summary>Memo button in the widgets task-card header.</summary>
+    public static SKRect WidgetsMemoManage(SKRect page, in FontScaleMetrics metrics)
+    {
         var card = WidgetsNotes(page, metrics);
-        return new SKRect(card.Left, card.Top, card.Right, card.Top + 24);
+        return new SKRect(card.Right - 232, card.Top + 3, card.Right - 164, card.Top + 23);
     }
 
     /// <summary>Height of the taller widgets column (the calendar stays 232 DIP; the right column grows).</summary>
@@ -460,7 +470,7 @@ public static class PageMetricsLayout
     /// <param name="metrics">Font-scale metrics.</param>
     /// <param name="taskCount">Tasks the card will paint (0 keeps the three-row height).</param>
     public static float WidgetsContentExtent(SKRect page, in FontScaleMetrics metrics, int taskCount = 0)
-        => Math.Max(BodyHeight, WidgetsNotes(page, metrics, taskCount).Bottom - (page.Top + BodyTop));
+        => BodyHeight;
 
     // ---------------------------------------------------------------- extents
 
@@ -713,6 +723,10 @@ public static class PageMetricsLayout
                 }
 
             case PageSlotKind.Widgets:
+                if (WidgetsMemoManage(scrolled, metrics).Contains(x, y))
+                {
+                    return IslandPageControl.MemoManage;
+                }
                 if (WidgetsTaskManage(scrolled, metrics).Contains(x, y))
                 {
                     return IslandPageControl.TaskManage;
@@ -729,7 +743,8 @@ public static class PageMetricsLayout
 
                 for (var i = 0; i < Math.Clamp(itemCount, 0, MaxPaintedTaskRows); i++)
                 {
-                    if (WidgetsTaskRow(scrolled, i, metrics).Contains(x, y))
+                    if (WidgetsTaskRow(scrolled, i, metrics).Contains(x, y)
+                        || WidgetsScheduleRow(scrolled, i, metrics).Contains(x, y))
                     {
                         index = i;
                         return IslandPageControl.TaskToggle;

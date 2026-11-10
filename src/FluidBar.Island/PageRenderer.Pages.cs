@@ -764,10 +764,9 @@ internal sealed partial class PageRenderer
 
     private void DrawWidgets(SKCanvas canvas, WidgetsPageModel model, SKRect page)
     {
-        DrawCalendar(canvas, model, page);
-        DrawWidgetWeather(canvas, model, page);
-        DrawWidgetStats(canvas, model, page);
         DrawWidgetTasks(canvas, model, page);
+        DrawCalendar(canvas, model, page);
+        DrawScheduleTimeline(canvas, model, page);
     }
 
     private void DrawCalendar(SKCanvas canvas, WidgetsPageModel model, SKRect page)
@@ -778,7 +777,7 @@ internal sealed partial class PageRenderer
             canvas,
             model.CalendarMonthTitle,
             IslandType.CalendarMonth,
-            new SKRect(card.Left + 10, card.Top + 8, card.Right - 56, card.Top + 26),
+            new SKRect(card.Left + 10, card.Top + 7, card.Right - 50, card.Top + 25),
             _theme.Foreground,
             TextAlign.Left,
             _opacity);
@@ -808,17 +807,17 @@ internal sealed partial class PageRenderer
             Alpha(_theme.ForegroundSecondary, _opacity),
             _icon);
 
-        const float cellWidth = 180f / 7f;
+        const float cellWidth = 130f / 7f;
         var headers = model.WeekdayHeaders;
         var headerCount = headers is null ? 0 : Math.Min(7, headers.Count);
         for (var i = 0; i < headerCount; i++)
         {
-            var left = page.Left + 26 + (i * cellWidth);
+            var left = card.Left + 10 + (i * cellWidth);
             _text.Draw(
                 canvas,
                 headers![i],
                 IslandType.CalendarWeek,
-                new SKRect(left, card.Top + 33, left + cellWidth, card.Top + 45),
+                new SKRect(left, card.Top + 28, left + cellWidth, card.Top + 40),
                 _theme.ForegroundTertiary,
                 TextAlign.Center,
                 _opacity);
@@ -830,6 +829,12 @@ internal sealed partial class PageRenderer
         {
             var day = days![i];
             var cell = PageLayout.WidgetsCalendarCell(page, i);
+            if (day.IsSelected && !day.IsToday)
+            {
+                _fill.Style = SKPaintStyle.Fill;
+                _fill.Color = Alpha(_theme.Accent, 0.3f * _opacity);
+                canvas.DrawCircle(cell.MidX, cell.MidY, 9, _fill);
+            }
             if (day.IsToday)
             {
                 _fill.Style = SKPaintStyle.Fill;
@@ -858,30 +863,49 @@ internal sealed partial class PageRenderer
                 _opacity);
         }
 
-        _stroke.Style = SKPaintStyle.Stroke;
-        _stroke.StrokeWidth = 1;
-        _stroke.Color = Alpha(_theme.Line, _opacity);
-        canvas.DrawLine(card.Left + 10, card.Top + 184, card.Right - 10, card.Top + 184, _stroke);
+    }
 
-        _fill.Style = SKPaintStyle.Fill;
-        _fill.Color = Alpha(_theme.Accent, _opacity);
-        canvas.DrawCircle(card.Left + 12, card.Top + 194, 2, _fill);
-        _text.Draw(
-            canvas,
-            model.CalendarEventText,
-            IslandType.CalendarFoot,
-            new SKRect(card.Left + 18, card.Top + 186, card.Right - 48, card.Top + 202),
-            _theme.ForegroundTertiary,
-            TextAlign.Left,
-            _opacity);
-        _text.Draw(
-            canvas,
-            model.TodayLabel,
-            IslandType.CalendarFoot,
-            new SKRect(card.Right - 44, card.Top + 186, card.Right - 10, card.Top + 202),
-            _theme.ForegroundTertiary,
-            TextAlign.Right,
-            _opacity);
+    private void DrawScheduleTimeline(SKCanvas canvas, WidgetsPageModel model, SKRect page)
+    {
+        var card = PageLayout.WidgetsSide(page);
+        DrawCard(canvas, card, 11);
+        _text.Draw(canvas, model.PlannerTitle, IslandType.NotesHead,
+            new SKRect(card.Left + 10, card.Top + 7, card.Right - 82, card.Top + 25),
+            _theme.ForegroundSecondary, TextAlign.Left, _opacity);
+        DrawWidgetHeaderButton(canvas, PageMetricsLayout.WidgetsTaskManage(page, _metrics), "添加规划",
+            IslandPageControl.TaskManage);
+
+        var tasks = model.Tasks;
+        var hasSchedule = false;
+        for (var i = 0; i < Math.Min(PageMetricsLayout.MaxPaintedTaskRows, tasks.Count); i++)
+        {
+            var task = tasks[i];
+            if (string.IsNullOrEmpty(task.TimeText)) continue;
+            hasSchedule = true;
+            var row = PageMetricsLayout.WidgetsScheduleRow(page, i, _metrics);
+            var tone = task.Priority switch
+            {
+                WidgetTaskPriority.High => _theme.Warning,
+                WidgetTaskPriority.Low => _theme.Info,
+                _ => _theme.Accent,
+            };
+            _stroke.Style = SKPaintStyle.Stroke;
+            _stroke.StrokeWidth = 1;
+            _stroke.Color = Alpha(_theme.Line, _opacity);
+            canvas.DrawLine(row.Left + 5, row.Top - 4, row.Left + 5, row.Bottom + 4, _stroke);
+            _fill.Style = SKPaintStyle.Fill;
+            _fill.Color = Alpha(task.Done ? _theme.Success : tone, _opacity);
+            canvas.DrawCircle(row.Left + 5, row.MidY, 3.2f, _fill);
+            _text.Draw(canvas, task.TimeText, IslandType.WidgetMeta,
+                new SKRect(row.Left + 14, row.Top, row.Left + 72, row.Bottom),
+                _theme.ForegroundTertiary, TextAlign.Left, _opacity);
+            var title = string.IsNullOrWhiteSpace(task.Category) ? task.Title : $"{task.Category} · {task.Title}";
+            _text.Draw(canvas, title, IslandType.TaskLabel,
+                new SKRect(row.Left + 76, row.Top, row.Right, row.Bottom),
+                task.Done ? _theme.ForegroundTertiary : _theme.ForegroundSecondary, TextAlign.Left, _opacity);
+        }
+        if (!hasSchedule)
+            DrawCardCaption(canvas, new SKRect(card.Left, card.Top + 24, card.Right, card.Bottom), model.TasksEmptyText, card.Left);
     }
 
     private void DrawWidgetWeather(SKCanvas canvas, WidgetsPageModel model, SKRect page)
@@ -1026,26 +1050,14 @@ internal sealed partial class PageRenderer
             canvas,
             model.TasksTitle,
             IslandType.NotesHead,
-            new SKRect(card.Left + 10, card.Top + 7, card.Right - 80, card.Top + 7 + headHeight),
+            new SKRect(card.Left + 10, card.Top + 7, card.Right - 84, card.Top + 7 + headHeight),
             _theme.ForegroundSecondary,
             TextAlign.Left,
             _opacity);
-        _text.Draw(
-            canvas,
-            model.TasksProgressText,
-            IslandType.WidgetMeta,
-            new SKRect(card.Right - 78, card.Top + 8, card.Right - 29,
-                card.Top + 8 + 12 + _metrics.LineGrow(IslandType.WidgetMeta)),
-            _theme.ForegroundTertiary,
-            TextAlign.Right,
-            _opacity);
+        DrawWidgetHeaderButton(canvas, PageMetricsLayout.WidgetsMemoManage(page, _metrics), "管理",
+            IslandPageControl.MemoManage);
 
-        _text.Draw(canvas, "+", IslandType.NotesHead,
-            new SKRect(card.Right - 25, card.Top + 5, card.Right - 7, card.Top + 23),
-            IsHovered(IslandPageControl.TaskManage) ? _theme.Foreground : _theme.ForegroundSecondary,
-            TextAlign.Center, _opacity);
-
-        if (painted == 0)
+        if (total == 0)
         {
             // The task card is the tallest body area; without rows only the header was painted, so the
             // card looked like an empty placeholder.
@@ -1126,6 +1138,17 @@ internal sealed partial class PageRenderer
                 TextAlign.Left,
                 _opacity);
         }
+    }
+
+    private void DrawWidgetHeaderButton(SKCanvas canvas, SKRect rect, string text, IslandPageControl control)
+    {
+        _fill.Style = SKPaintStyle.Fill;
+        _fill.Color = Alpha(IsHovered(control) ? _theme.Accent : _theme.Foreground,
+            (IsHovered(control) ? 0.18f : 0.08f) * _opacity);
+        canvas.DrawRoundRect(rect, 8, 8, _fill);
+        _text.Draw(canvas, text, IslandType.WidgetMeta, rect,
+            IsHovered(control) ? _theme.Foreground : _theme.ForegroundSecondary,
+            TextAlign.Center, _opacity);
     }
 
     private SKColor StatTone(WidgetStatTone tone) => tone switch

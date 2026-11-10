@@ -68,15 +68,11 @@ public sealed record IslandPreviewModel
     /// <summary>Simulated-glass tier paints a fixed translucent fill (renderer parity: 0.72).</summary>
     public const double GlassFillOpacity = 0.72;
 
-    /// <summary>Liquid-glass tier paints a fixed translucent fill (renderer parity: 0.68).</summary>
+    /// <summary>Liquid-glass default fill before applying the user's live opacity setting.</summary>
     public const double LiquidGlassFillOpacity = LiquidGlassTokens.FillOpacity;
 
-    /// <summary>Fill opacity actually painted (translucent tiers override the slider, like the renderer).</summary>
-    public double EffectiveFillOpacity => LiquidGlass
-        ? LiquidGlassFillOpacity
-        : Glass
-            ? GlassFillOpacity
-            : Math.Clamp(FillOpacity, LayoutTokens.MinFillOpacity, 1.0);
+    /// <summary>Fill opacity actually painted by the selected material.</summary>
+    public double EffectiveFillOpacity => Math.Clamp(FillOpacity, LayoutTokens.MinFillOpacity, 1.0);
 
     /// <summary>Corner radius clamped to the preview shell height.</summary>
     /// <param name="shellHeight">Rendered shell height.</param>

@@ -54,6 +54,9 @@ internal sealed partial class AppBootstrap
     private StartupRegistrationSync? _startupRegistration;
     private AppUpdateCoordinator? _updates;
     private CrashGuard? _crashGuard;
+    private DispatcherTimer? _scheduleReminderTimer;
+    private readonly HashSet<string> _triggeredScheduleReminders = new(StringComparer.Ordinal);
+    private long _scheduleReminderSequence;
 
     /// <summary>True when safe mode is on, whether the user set it or the crash guard forced it.</summary>
     private bool SafeModeActive => _settings.Current.Advanced.SafeMode || _forcedSafeMode;
@@ -407,6 +410,7 @@ internal sealed partial class AppBootstrap
                 BringToFront(window);
             });
             actions.TaskManagementRequested += (_, _) => Dispatcher.UIThread.Post(ShowTaskManager);
+            actions.MemoManagementRequested += (_, _) => Dispatcher.UIThread.Post(ShowMemoManager);
             actions.StartInBackground();
             return actions;
         }
@@ -450,6 +454,7 @@ internal sealed partial class AppBootstrap
                 host.MarketRequested += OpenMarket;
                 await host.StartAsync().ConfigureAwait(true);
                 _skiaHost = host;
+                StartScheduleReminderTimer();
                 host.PluginPageCommandRequested += request => _ = ExecutePluginPageCommandAsync(request);
                 host.PageChooserRequested += () => _ = Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(ShowPageChooser);
                 _logger.Information(LogCategories.Lifecycle, "app.host-selected", "Island host: skia (layered Win32).");
@@ -1244,6 +1249,43 @@ internal sealed partial class AppBootstrap
     }
 
     private TaskManagerWindow? _taskManagerWindow;
+    private MemoManagerWindow? _memoManagerWindow;
+
+    private void StartScheduleReminderTimer()
+    {
+        _scheduleReminderTimer?.Stop();
+        _scheduleReminderTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+        _scheduleReminderTimer.Tick += (_, _) => CheckScheduleReminders();
+        _scheduleReminderTimer.Start();
+        CheckScheduleReminders();
+    }
+
+    private void CheckScheduleReminders()
+    {
+        if (_platformActions is null || _skiaHost is null) return;
+        var now = DateTimeOffset.Now;
+        var snapshot = _platformActions.TaskSource.Load();
+        if (!snapshot.IsAvailable) return;
+        foreach (var item in snapshot.Items)
+        {
+            if (item.Done || item.ReminderAt is not { } reminder || item.ReminderDismissedAt is not null) continue;
+            var localReminder = reminder.ToLocalTime();
+            if (localReminder > now || localReminder < now.AddMinutes(-5)) continue;
+            var key = $"{item.Title}\u001f{reminder:O}";
+            if (!_triggeredScheduleReminders.Add(key)) continue;
+            var eventText = item.Date is { } date && item.StartTime is { } time
+                ? $"{date:yyyy-MM-dd} {time:HH:mm}" : "日程提醒";
+            _skiaHost.PublishActivity(ActivityKind.Notification, new ActivityPayload
+            {
+                Title = item.Title,
+                Body = $"{eventText}  点击查看详情，Esc 关闭",
+                SourceName = "日程提醒",
+                IconToken = "timer",
+                AccentColorHex = item.Priority == FluidBar.Platform.Windows.Tasks.TaskPriority.High ? "#FF5C7A" : "#69D6FF",
+                Ttl = TimeSpan.FromSeconds(30),
+            }, Interlocked.Increment(ref _scheduleReminderSequence), "schedule-reminder");
+        }
+    }
 
     private void ShowTaskManager()
     {
@@ -1254,9 +1296,40 @@ internal sealed partial class AppBootstrap
             return;
         }
         if (_platformActions is null || _localizer is null) return;
-        var window = new TaskManagerWindow(_platformActions.TaskSource, _localizer);
+        var window = new TaskManagerWindow(_platformActions.TaskSource, _localizer, _settings, _platformActions.SelectedCalendarDate);
         _taskManagerWindow = window;
         window.Closed += (_, _) => _taskManagerWindow = null;
+        window.Show();
+        BringToFront(window);
+    }
+
+    private void ShowMemoManager()
+    {
+        if (_memoManagerWindow is { } existing)
+        {
+            BringToFront(existing);
+            existing.FocusInput();
+            return;
+        }
+
+        var window = new MemoManagerWindow(_settings, async entry =>
+        {
+            var combined = string.IsNullOrWhiteSpace(entry.Content)
+                ? entry.Title
+                : $"{entry.Title}：{entry.Content}";
+            await _platformActions!.TaskSource.AddAsync(combined);
+            _skiaHost?.PublishActivity(ActivityKind.Notification, new ActivityPayload
+            {
+                Title = entry.Title,
+                Body = string.IsNullOrWhiteSpace(entry.Content) ? "备忘录已添加" : entry.Content,
+                SourceName = "备忘录",
+                IconToken = "note",
+                AccentColorHex = "#E8E8EF",
+                Ttl = TimeSpan.FromSeconds(12),
+            }, Interlocked.Increment(ref _scheduleReminderSequence), "memo-added");
+        });
+        _memoManagerWindow = window;
+        window.Closed += (_, _) => _memoManagerWindow = null;
         window.Show();
         BringToFront(window);
     }
@@ -1290,7 +1363,8 @@ internal sealed partial class AppBootstrap
             frameStats: _skiaHost,
             restartToInstall: RestartToInstall,
             pages: _pageRegistry,
-            executeQuickAction: ExecuteQuickActionAsync);
+            executeQuickAction: ExecuteQuickActionAsync,
+            notifications: _platformActions?.NotificationSource);
         window.EnableCenterFade();
 
         window.Closed += (_, _) => _settingsWindow = null;
@@ -1349,6 +1423,8 @@ internal sealed partial class AppBootstrap
         }
 
         _shutdownStarted = true;
+        _scheduleReminderTimer?.Stop();
+        _scheduleReminderTimer = null;
         _pluginRuntime?.DisposeInBackground();
         _pluginRuntime = null;
         // The single notification listener is owned (and disposed exactly once) by _platformActions.
@@ -1358,12 +1434,14 @@ internal sealed partial class AppBootstrap
         try
         {
             _taskManagerWindow?.Close();
+            _memoManagerWindow?.Close();
             _clipboardSearchWindow?.Close();
         }
         catch (InvalidOperationException)
         {
         }
 
+        _memoManagerWindow = null;
         _clipboardSearchWindow = null;
         _skiaHost?.Dispose();
         _skiaHost = null;

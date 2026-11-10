@@ -1230,7 +1230,7 @@ public sealed record AgentItemModel
     public double ProgressPercent { get; init; } = -1;
 }
 
-/// <summary>Expanded widgets page (page 5): month calendar, weather, system stats and a task list.</summary>
+/// <summary>Expanded widgets page (page 5): task list and calendar timeline planner.</summary>
 public sealed record WidgetsPageModel
 {
     /// <summary>Vertical scroll offset in DIP (widgets content can exceed the 232 DIP body at large scales).</summary>
@@ -1281,6 +1281,8 @@ public sealed record WidgetsPageModel
     /// <summary>Task card title ("Today").</summary>
     public string? TasksTitle { get; init; }
 
+    public string? PlannerTitle { get; init; }
+
     /// <summary>Task progress label ("1/3 done"); supplied pre-formatted to avoid per-frame strings.</summary>
     public string? TasksProgressText { get; init; }
 
@@ -1304,7 +1306,7 @@ public sealed record WidgetsPageModel
 }
 
 /// <summary>One calendar cell.</summary>
-public readonly record struct CalendarDayModel(int Day, bool InMonth = true, bool IsToday = false, bool HasEvents = false);
+public readonly record struct CalendarDayModel(int Day, bool InMonth = true, bool IsToday = false, bool HasEvents = false, bool IsSelected = false);
 
 /// <summary>Stat tone for the widgets system card.</summary>
 public enum WidgetStatTone
@@ -1326,5 +1328,17 @@ public enum WidgetStatTone
 public readonly record struct WidgetStatModel(string Label, int Value, WidgetStatTone Tone = WidgetStatTone.Neutral);
 
 /// <summary>One widget task row.</summary>
-public readonly record struct WidgetTaskModel(string Title, bool Done = false);
+public enum WidgetTaskPriority
+{
+    Low,
+    Normal,
+    High,
+}
+
+public readonly record struct WidgetTaskModel(
+    string Title,
+    bool Done = false,
+    string? TimeText = null,
+    WidgetTaskPriority Priority = WidgetTaskPriority.Normal,
+    string? Category = null);
 

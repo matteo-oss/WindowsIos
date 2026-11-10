@@ -992,6 +992,12 @@ public sealed partial class SkiaIslandHost : IDisposable, IFrameStatsSource
         {
             _controller.HandlePointerReleased(pointer.ClientXDip, pointer.ClientYDip);
         };
+        host.PointerDoubleClicked += pointer =>
+        {
+            _controller.HandlePointerDoubleClicked(pointer.ClientXDip, pointer.ClientYDip);
+            EnsureDeadlineTicker();
+            EnsureFrameLoop();
+        };
         host.PointerWheel += wheel =>
         {
             // One Win32 notch (120 raw) maps to one 60 DIP Core wheel notch, i.e. one page step.

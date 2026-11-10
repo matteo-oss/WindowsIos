@@ -298,6 +298,7 @@ public static class SkiaIslandStateBuilder
         {
             var item = items[i];
             var code = NullIfEmpty(item.VerificationCode);
+            var accent = ResolveSocialAccent(item.Source, item.Title);
             models[i] = new NotificationItemModel
             {
                 AppName = NullIfEmpty(item.Source),
@@ -308,6 +309,7 @@ public static class SkiaIslandStateBuilder
                 CodeChipLabel = code is null
                     ? null
                     : localizer.Format(LocKeys.Notifications.VerificationCode, ("code", code)),
+                AccentHex = accent,
                 IsUnread = item.IsUnread,
                 AppIconPng = item.AppIconPng,
                 AppIconKey = item.AppIconKey,
@@ -315,6 +317,20 @@ public static class SkiaIslandStateBuilder
         }
 
         return models;
+    }
+
+    private static string? ResolveSocialAccent(string? source, string? title)
+    {
+        var text = $"{source} {title}";
+        if (text.Contains("微信", StringComparison.OrdinalIgnoreCase) || text.Contains("WeChat", StringComparison.OrdinalIgnoreCase))
+            return "#07C160";
+        if (text.Contains("钉钉", StringComparison.OrdinalIgnoreCase) || text.Contains("DingTalk", StringComparison.OrdinalIgnoreCase))
+            return "#0089FF";
+        if (text.Contains("飞书", StringComparison.OrdinalIgnoreCase) || text.Contains("Feishu", StringComparison.OrdinalIgnoreCase) || text.Contains("Lark", StringComparison.OrdinalIgnoreCase))
+            return "#3370FF";
+        if (text.Contains("企业微信", StringComparison.OrdinalIgnoreCase) || text.Contains("WXWork", StringComparison.OrdinalIgnoreCase) || text.Contains("WeCom", StringComparison.OrdinalIgnoreCase))
+            return "#2984F8";
+        return null;
     }
 
     private static ClipboardItemModel[] BuildClipboard(IReadOnlyList<ClipboardItemData> items, ILocalizer localizer)
@@ -374,7 +390,7 @@ public static class SkiaIslandStateBuilder
         for (var i = 0; i < days.Length; i++)
         {
             var day = content.CalendarDays[i];
-            days[i] = new CalendarDayModel(day.Day, day.InMonth, day.IsToday, day.HasEvents);
+            days[i] = new CalendarDayModel(day.Day, day.InMonth, day.IsToday, day.HasEvents, day.IsSelected);
         }
 
         var tasks = new WidgetTaskModel[content.Tasks.Length];
@@ -382,22 +398,14 @@ public static class SkiaIslandStateBuilder
         for (var i = 0; i < tasks.Length; i++)
         {
             var task = content.Tasks[i];
-            tasks[i] = new WidgetTaskModel(task.Title, task.Done);
+            tasks[i] = new WidgetTaskModel(task.Title, task.Done, task.TimeText,
+                (WidgetTaskPriority)task.Priority, task.Category);
             if (task.Done)
             {
                 done++;
             }
         }
 
-        var stats = new WidgetStatModel[content.Stats.Length];
-        for (var i = 0; i < stats.Length; i++)
-        {
-            var stat = content.Stats[i];
-            stats[i] = new WidgetStatModel(stat.Label, stat.Value, (WidgetStatTone)stat.Kind);
-        }
-
-        // Weather and tasks have no platform source yet: instead of painting blank cards, the renderer
-        // is handed a localized "unavailable" caption for each empty widget.
         var unavailable = localizer.Get(LocKeys.Settings.Plugins.StateUnavailable);
         return new WidgetsPageModel
         {
@@ -407,29 +415,13 @@ public static class SkiaIslandStateBuilder
                 : content.WeekdayHeaders,
             CalendarDays = days,
             CalendarEventText = localizer.Get(LocKeys.Page.Widgets.NoEvents),
-            TasksTitle = localizer.Get(LocKeys.Page.Widgets.Tasks),
+            TasksTitle = localizer.CurrentCulture.TwoLetterISOLanguageName == "zh" ? "备忘录" : "Memos",
+            PlannerTitle = localizer.CurrentCulture.TwoLetterISOLanguageName == "zh" ? "日程规划" : "Schedule",
             TasksProgressText = content.TasksProgressText
                 ?? (tasks.Length == 0 ? null : $"{done}/{tasks.Length}"),
             TasksOverflowText = content.TasksMoreText,
             TodayLabel = localizer.Get(LocKeys.Page.Widgets.Today),
             Tasks = tasks,
-            Stats = stats,
-            // Real weather from the Open-Meteo monitor; the glyph is the WMO code mapped onto the three
-            // weather icons the island has. Without a reading the card keeps the explicit unavailable state.
-            WeatherTemp = content.WeatherTemp,
-            WeatherCondition = content.WeatherConditionText,
-            WeatherHighLow = content.WeatherHighLow,
-            WeatherWind = content.WeatherWind,
-            WeatherIcon = content.WeatherTemp is null
-                ? null
-                : content.WeatherGlyph switch
-                {
-                    WidgetWeatherGlyph.Sun => IconKind.Sun,
-                    WidgetWeatherGlyph.Moon => IconKind.Moon,
-                    _ => IconKind.CloudSun,
-                },
-            WeatherUnavailableText = content.WeatherTemp is null ? unavailable : null,
-            StatsEmptyText = unavailable,
             TasksEmptyText = tasks.Length == 0 ? content.TasksEmptyHint ?? unavailable : null,
         };
     }
@@ -500,6 +492,8 @@ public static class SkiaIslandStateBuilder
         AppendAgents(builder, content.Agents);
         AppendStats(builder, content.Stats);
         AppendTasks(builder, content.Tasks);
+        foreach (var day in content.CalendarDays)
+            builder.Append(day.Day).Append(day.IsSelected).Append(day.HasEvents).Append(day.IsToday);
         return builder.ToString();
     }
 
@@ -576,7 +570,9 @@ public static class SkiaIslandStateBuilder
         for (var i = 0; i < items.Count; i++)
         {
             var item = items[i];
-            builder.Append(item.Title).Append('|').Append(item.Done ? '1' : '0').Append('|');
+            builder.Append(item.Title).Append('|').Append(item.Done ? '1' : '0').Append('|')
+                .Append(item.TimeText).Append('|').Append((int)item.Priority).Append('|')
+                .Append(item.Category).Append('|');
         }
     }
 
